@@ -1,8 +1,13 @@
 {
-  // Marketing site. Static assets only: no Worker script, no routes, no custom domain.
+  // Marketing site. Static assets only: no Worker script.
+  // Custom domains attach on the next deploy. This file does not deploy by itself.
   "name": "statuspan-site",
   "compatibility_date": "2026-11-23",
   "assets": {
     "directory": "."
-  }
+  },
+  "routes": [
+    { "pattern": "statuspan.com", "custom_domain": true },
+    { "pattern": "www.statuspan.com", "custom_domain": true }
+  ]
 }
