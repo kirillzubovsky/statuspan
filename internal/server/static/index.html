@@ -1,0 +1,1236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'">
+<title>StatusPan</title>
+<script>
+(function () {
+  var stored = null;
+  try { stored = localStorage.getItem("statuspan-theme"); } catch (e) {}
+  var night = stored === "night" || (stored !== "day" && window.matchMedia("(prefers-color-scheme: dark)").matches);
+  if (night) document.documentElement.classList.add("dark");
+  document.documentElement.setAttribute("data-theme", night ? "night" : "day");
+  document.documentElement.style.colorScheme = night ? "dark" : "light";
+})();
+</script>
+<style>
+:root{
+ --bg:#f3f3f0;--surf:#fafaf8;--surf2:#ebebe7;--border:#e0e0db;--border2:#d3d3cd;
+ --text:#1f2024;--text2:#53565d;--text3:#61646b;--accent:#5160c9;--accent-bg:#e6e8f6;
+ --queued:#61646b;--running:#2a62c4;--blocked:#7a52c7;--done:#26703f;--failed:#c0363c;--stalled:#a64a07;--abandoned:#6e7178;
+ --running-bg:#e3ebf8;--blocked-bg:#ece6f7;--done-bg:#e2efe6;--failed-bg:#f7e4e4;--stalled-bg:#f8e9dc;--queued-bg:#e8e8e5;--abandoned-bg:#e7e7e4;
+ --track:#e3e3de;--shadow:0 1px 2px rgba(20,20,30,.05);
+ color-scheme:light;
+}
+html.dark{
+ --bg:#1b1c20;--surf:#222329;--surf2:#2a2b32;--border:#2f3138;--border2:#3a3c44;
+ --text:#e4e5e9;--text2:#a7aab2;--text3:#969aa3;--accent:#8e96f2;--accent-bg:#2c2f4a;
+ --queued:#969aa3;--running:#72a3f5;--blocked:#b8a1f3;--done:#62c088;--failed:#f07f7f;--stalled:#f0a35c;--abandoned:#9aa0a8;
+ --running-bg:#24304a;--blocked-bg:#2f2a45;--done-bg:#203528;--failed-bg:#3d2527;--stalled-bg:#3d2e20;--queued-bg:#2c2d33;--abandoned-bg:#2c2d32;
+ --track:#30323a;--shadow:0 1px 2px rgba(0,0,0,.25);
+ color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{background:var(--bg);color:var(--text);font:13px/1.45 Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;-webkit-font-smoothing:antialiased;font-feature-settings:"cv11","ss01";display:flex;flex-direction:column}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+.mono{font-family:"SF Mono",ui-monospace,Menlo,"JetBrains Mono",monospace;font-size:12px}
+.muted{color:var(--text2)}.faint{color:var(--text3)}
+.kbd{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 4px;border:1px solid var(--border2);border-bottom-width:2px;border-radius:4px;font-size:11px;color:var(--text2);background:var(--surf)}
+.btn{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 10px;border:1px solid var(--border2);border-radius:6px;background:var(--surf);color:var(--text);font:inherit;cursor:pointer;box-shadow:var(--shadow)}
+.btn:hover{background:var(--surf2)}
+.pill{display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 7px;border-radius:10px;font-size:11.5px;font-weight:550;white-space:nowrap}
+.st-queued{color:var(--queued)}.st-running{color:var(--running)}.st-blocked{color:var(--blocked)}.st-done{color:var(--done)}.st-failed{color:var(--failed)}
+.pill.queued{background:var(--queued-bg);color:var(--queued)}.pill.running{background:var(--running-bg);color:var(--running)}.pill.blocked{background:var(--blocked-bg);color:var(--blocked)}.pill.done{background:var(--done-bg);color:var(--done)}.pill.failed{background:var(--failed-bg);color:var(--failed)}
+.stalled{background:var(--stalled-bg);color:var(--stalled);font-weight:650;letter-spacing:.03em;font-size:10.5px}
+.pill.abandoned{background:var(--abandoned-bg);color:var(--abandoned);font-weight:650;letter-spacing:.03em;font-size:10.5px}
+.bar{height:4px;border-radius:2px;background:var(--track);overflow:hidden}.bar>i{display:block;height:100%;border-radius:2px}
+.avatar{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:5px;font-size:10.5px;font-weight:650;color:#fff;flex:none}
+.live{display:inline-flex;align-items:center;gap:6px;color:var(--text2);font-size:12px;margin-left:auto;font-variant-numeric:tabular-nums;white-space:nowrap}
+.live::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--done);box-shadow:0 0 0 3px var(--done-bg);flex:none}
+.live.wait::before{background:var(--stalled);box-shadow:0 0 0 3px var(--stalled-bg)}
+.live.warn{color:var(--failed);font-weight:650}
+.live.warn::before{background:var(--failed);box-shadow:0 0 0 3px var(--failed-bg)}
+.logo{display:flex;align-items:center;gap:8px;font-weight:650;font-size:14px;letter-spacing:-.01em;color:var(--text)}
+.logo:hover{color:var(--text);text-decoration:none}
+.logo b{width:20px;height:20px;border-radius:6px;background:var(--accent);display:inline-flex;align-items:center;justify-content:center}
+.logo b::after{content:"";width:8px;height:8px;border-radius:50%;border:2px solid var(--surf)}
+svg.si{flex:none;display:block}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.sr{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+
+.top{min-height:50px;display:flex;align-items:center;gap:14px;padding:8px 20px;border-bottom:1px solid var(--border);background:var(--surf);flex:none}
+.summary{display:flex;flex-wrap:wrap;gap:6px 8px;align-items:center;min-width:0;color:var(--text2);font-size:12px}
+.summary .dotsep{color:var(--text3)}
+.stall-n{color:var(--stalled);font-weight:650}
+.abandon-n{color:var(--text3);font-weight:650}
+#app{flex:1;min-height:0}
+.board{height:100%;display:flex;flex-direction:column;min-height:0}
+.filters{display:flex;align-items:center;gap:6px;padding:12px 20px;border-bottom:1px solid var(--border);flex-wrap:wrap}
+.filters .label{font-size:12px;margin-right:4px}
+.filters .spacer{margin-left:auto}
+.ag{height:26px;display:inline-flex;align-items:center;gap:6px;padding:0 9px 0 8px;border-radius:13px;border:1px solid var(--border);background:var(--surf);font:inherit;font-size:12px;color:var(--text2);cursor:pointer}
+.ag.on,.chip.on{border-color:var(--border2);color:var(--text)}
+.ag:hover{background:var(--surf2)}
+.chip{display:inline-flex;align-items:center;height:26px;padding-right:3px;border-radius:13px;border:1px solid var(--border);background:var(--surf);color:var(--text2)}
+.chip .ag{border:0;background:transparent;height:24px;padding:0 4px 0 4px;border-radius:12px;color:inherit;box-shadow:none}
+.chip .nm{max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ag-open{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:9px;color:var(--text3);font-size:13px;text-decoration:none}
+.ag-open:hover{background:var(--surf2);color:var(--accent);text-decoration:none}
+.who,a.who{display:inline-flex;align-items:center;gap:7px;min-width:0;color:var(--text2);font-weight:500}
+a.who:hover{color:var(--text);text-decoration:none}
+.who span,a.who span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.board-frame{flex:1;min-height:0;min-width:0;display:flex;flex-direction:column;overflow:hidden}
+.board-frame.split{display:grid;grid-template-columns:minmax(0,1fr) 340px}
+.board-main{display:flex;flex-direction:column;min-width:0;min-height:0;background:var(--surf);overflow:hidden}
+.blist{overflow:auto;flex:1;min-height:0;padding-bottom:48px}
+.brow{display:grid;grid-template-columns:156px minmax(0,1fr) 132px 140px 112px;align-items:center;column-gap:16px;min-height:48px;padding:0 20px;border-bottom:1px solid var(--border);width:100%;font-size:14px;font-variant-numeric:tabular-nums}
+.brow[role="button"]{cursor:pointer;transition:background .08s ease}
+.brow[role="button"]:hover{background:var(--bg)}
+.brow.sel,.brow.sel:hover{background:var(--accent-bg)}
+.brow.is-stalled{box-shadow:inset 3px 0 0 var(--stalled)}
+.brow.is-abandoned{box-shadow:inset 3px 0 0 var(--abandoned)}
+.brow-h{min-height:32px;cursor:default;font-size:11.5px;font-weight:600;color:var(--text3);position:sticky;top:0;z-index:2;background:var(--surf)}
+.b-bot{min-width:0;display:flex;align-items:center}
+.b-bot .who{max-width:100%;min-width:0}
+.b-title{font-weight:600;font-size:15px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.b-status{display:inline-flex;align-items:center;gap:6px;min-width:0;white-space:nowrap}
+.word{font-size:12px;font-weight:700;letter-spacing:.12em;text-transform:uppercase}
+.word.failed{color:var(--failed)}.word.blocked{color:var(--blocked)}.word.stalled{color:var(--stalled)}.word.abandoned{color:var(--abandoned)}.word.running{color:var(--running)}.word.queued{color:var(--queued)}.word.done{color:var(--done)}
+.b-upd{font-size:13px;color:var(--text2);text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+.b-prog .pct{flex:none;width:36px;text-align:right;font-variant-numeric:tabular-nums}
+.sh{display:flex;align-items:center;gap:8px;height:40px;margin:0;padding:0 20px;font-size:11.5px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--text3);background:color-mix(in srgb,var(--surf2) 70%,var(--bg));border-bottom:1px solid var(--border)}
+.fold{display:flex;align-items:center;gap:8px;width:100%;min-height:48px;margin:0;padding:0 20px;border:0;border-bottom:1px solid var(--border);background:color-mix(in srgb,var(--surf2) 70%,var(--bg));color:var(--text);font:inherit;font-size:14px;font-weight:650;cursor:pointer;text-align:left}
+.fold:hover{background:var(--surf2)}
+.fold .tri{width:1em;color:var(--text3);font-size:12px}
+.fold .n{color:var(--text3);font-weight:550;font-variant-numeric:tabular-nums}
+.menu{position:relative;flex:none}
+.btn.slim{height:26px;padding:0 8px;font-size:12px}
+.btn.more{width:28px;height:26px;padding:0;justify-content:center;font-size:16px;line-height:1}
+.menu-pop{position:absolute;right:0;top:calc(100% + 6px);min-width:148px;padding:4px;background:var(--surf);border:1px solid var(--border2);border-radius:8px;box-shadow:var(--shadow);z-index:20}
+.menu-pop button{display:block;width:100%;text-align:left;background:transparent;border:0;border-radius:6px;font:inherit;font-size:13px;color:var(--text);padding:8px 10px;cursor:pointer}
+.menu-pop button:hover{background:var(--surf2)}
+.sh .n{color:var(--text3);font-weight:500}
+.bsec.done .brow[role="button"]{opacity:.92}
+.bsec.abandoned .sh{color:var(--text3)}
+.bsec.abandoned .brow[role="button"]{opacity:.72}
+.row.is-abandoned{opacity:.78}
+.bsec .older{margin:8px 20px 12px;width:calc(100% - 40px)}
+.empty{border:1px dashed var(--border2);border-radius:8px;padding:14px;text-align:center;color:var(--text3);font-size:12px;margin:8px 20px}
+.older{width:100%;height:28px;border:1px dashed var(--border2);border-radius:8px;background:transparent;color:var(--text2);font:inherit;cursor:pointer}
+.older:hover{background:var(--surf)}
+.hint{display:none}
+.board.has-detail .hint{right:auto;left:20px}
+.btn.x{width:28px;padding:0;justify-content:center;font-size:16px;line-height:1}
+.panel .missing{margin:6vh 0;padding:8px 18px 20px}
+@media (prefers-reduced-motion:reduce){.brow[role="button"]{transition:none}}
+
+.agent-page{height:100%;display:grid;grid-template-columns:minmax(0,1fr) 340px;min-height:0}
+.agent-main{display:flex;flex-direction:column;min-width:0;min-height:0;background:var(--surf)}
+.sub{min-height:46px;display:flex;align-items:center;gap:10px;padding:8px 16px 8px 20px;border-bottom:1px solid var(--border);flex-wrap:wrap}
+.sub h1{font-size:13.5px;font-weight:600;margin:0}
+a.back{color:var(--text2);font-weight:550}
+a.back:hover{color:var(--text)}
+.counts{margin-left:auto;display:flex;flex-wrap:wrap;gap:10px;font-size:12px;color:var(--text3);font-weight:500}
+.counts .bit{display:inline-flex;align-items:center;gap:5px}
+.list{overflow:auto;flex:1;min-height:0}
+.row{display:grid;grid-template-columns:18px minmax(88px,150px) minmax(0,1fr) 108px 72px 84px 28px;align-items:center;gap:10px;min-height:40px;padding:6px 16px 6px 20px;border-bottom:1px solid var(--border);cursor:pointer;width:100%}
+.row:hover{background:var(--bg)}
+.row.sel{background:var(--accent-bg)}
+.row .id{color:var(--text3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.row .t{display:flex;align-items:center;gap:8px;min-width:0}
+.row .t b{font-weight:550;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:46%}
+.row .t em{font-style:normal;color:var(--text3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:12px;min-width:0}
+.prog{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text2)}
+.prog .bar{flex:1}
+.row .el,.row .up{font-size:12px;color:var(--text2);text-align:right;white-space:nowrap}
+a.ext{color:var(--accent);font-size:14px;text-decoration:none}
+.panel{border-left:1px solid var(--border);display:flex;flex-direction:column;background:var(--bg);min-height:0;min-width:0}
+.ph{min-height:46px;display:flex;align-items:center;gap:8px;padding:8px 16px;border-bottom:1px solid var(--border);font-weight:600}
+.ph .btn{margin-left:auto}
+.detail{padding:14px 16px;border-bottom:1px solid var(--border);display:flex;flex-direction:column;gap:10px}
+.detail h2{margin:0;font-size:13.5px;font-weight:600;line-height:1.35;overflow-wrap:anywhere}
+.kicker{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.kv{display:grid;grid-template-columns:78px minmax(0,1fr);gap:6px 10px;font-size:12px}
+.kv span:nth-child(odd){color:var(--text3)}
+.kv span:nth-child(even){overflow-wrap:anywhere}
+.feed{overflow:auto;flex:1;min-height:0;padding:6px 0}
+.ev{display:grid;grid-template-columns:14px minmax(0,1fr);gap:10px;padding:8px 16px;font-size:12.5px}
+.ev .w{color:var(--text2)}
+.ev .tm{color:var(--text3);font-size:11.5px}
+.ev .note{color:var(--text2);margin-top:2px}
+.missing{max-width:440px;margin:12vh auto;padding:8px 24px 24px;text-align:center}
+.missing h1{font-size:16px;font-weight:600;margin:0 0 8px}
+.missing p{color:var(--text2);margin:0 0 14px}
+@media (max-width:900px){
+ #app{overflow:auto}
+ .board{height:auto;min-height:100%}
+ .board-frame,.board-frame.split{display:flex;flex-direction:column;height:auto;overflow:visible}
+ .blist{overflow:visible}
+ .agent-page{grid-template-columns:1fr;height:auto}
+ .panel{border-left:0;border-top:1px solid var(--border);min-height:320px}
+ .row{grid-template-columns:18px minmax(0,1fr) 28px}
+ .row .id,.row .prog,.el,.up{display:none}
+ .brow{grid-template-columns:112px minmax(0,1fr) 168px 76px;column-gap:10px;padding:0 12px}
+ .b-prog{display:none}
+ .board.has-detail .hint{left:auto;right:20px}
+}
+</style>
+</head>
+<body>
+<header class="top">
+  <a class="logo" href="#/"><b></b>StatusPan</a>
+  <span id="conn" class="live" role="status" aria-live="polite">Live</span>
+  <div class="menu">
+    <button type="button" class="btn more" id="more" aria-label="More" aria-haspopup="menu" aria-expanded="false" aria-controls="more-menu">⋯</button>
+    <div class="menu-pop" id="more-menu" role="menu" hidden>
+      <button type="button" role="menuitem" id="clear-all" data-clear-all="1">Clear all</button>
+    </div>
+  </div>
+  <button type="button" class="btn slim" id="tt">Night</button>
+</header>
+<div id="app"></div>
+<noscript><p class="empty">StatusPan needs JavaScript to show the live board.</p></noscript>
+<script>
+(function () {
+  var LABELS = { queued: "Queued", running: "Running", blocked: "Blocked", done: "Done", failed: "Failed", stalled: "Stalled", abandoned: "Abandoned" };
+  var RANK = { running: 0, blocked: 1, queued: 2, failed: 3, done: 4 };
+  var PALETTE = ["#5b6bd6", "#3f8f86", "#c0662e", "#b0437f", "#56708f", "#7d6a32", "#3d6b9a", "#6a4a8a", "#2f7d57", "#8a4a3a"];
+  var abandonAfterSeconds = 24 * 60 * 60;
+  var abandonWaitingAfterSeconds = 7 * 24 * 60 * 60;
+
+  var jobs = [];
+  var events = new Map();
+  var offset = 0;
+  var selectedJob = "";
+  var loadedAgent = "";
+  var fetchGen = 0;
+  var agentLoaded = new Set();
+  var agentError = new Set();
+  var lastStall = "";
+  var sawSnapshot = false;
+  var es = null;
+  var lastOk = 0;
+  var fetchFailed = false;
+  var unhealthySince = 0;
+  var dataSerial = 0;
+  var awaitRefetch = false;
+  var SEV = { failed: 0, blocked: 1, stalled: 2, abandoned: 3 };
+
+  function esc(s) {
+    return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+      return ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c];
+    });
+  }
+
+  function knownState(state) {
+    return Object.prototype.hasOwnProperty.call(LABELS, state) ? state : "queued";
+  }
+
+  function safeHref(raw) {
+    var s = String(raw || "").trim();
+    if (!s || /[\u0000-\u0020"'<>\\]/.test(s)) return "";
+    var low = s.toLowerCase();
+    var https = low.indexOf("https:") === 0 && s.charAt(6) === "/" && s.charAt(7) === "/";
+    var http = low.indexOf("http:") === 0 && s.charAt(5) === "/" && s.charAt(6) === "/";
+    if (!https && !http) return "";
+    return s;
+  }
+
+  function icon(state, p, s) {
+    state = knownState(state);
+    p = p || 0;
+    s = s || 14;
+    var c = "var(--" + state + ")";
+    var r = s / 2 - 1.25;
+    var cx = s / 2;
+    if (state === "queued") {
+      return '<svg class="si" width="' + s + '" height="' + s + '" aria-hidden="true"><circle cx="' + cx + '" cy="' + cx + '" r="' + r + '" fill="none" stroke="' + c + '" stroke-width="1.5" stroke-dasharray="2.2 2"/></svg>';
+    }
+    if (state === "running") {
+      var a = Math.max(p, 8) / 100 * 2 * Math.PI;
+      var ir = r - 2.2;
+      var x = cx + ir * Math.sin(a);
+      var y = cx - ir * Math.cos(a);
+      var lg = a > Math.PI ? 1 : 0;
+      return '<svg class="si" width="' + s + '" height="' + s + '" aria-hidden="true"><circle cx="' + cx + '" cy="' + cx + '" r="' + r + '" fill="none" stroke="' + c + '" stroke-width="1.5"/><path d="M' + cx + ' ' + cx + ' L' + cx + ' ' + (cx - ir) + ' A' + ir + ' ' + ir + ' 0 ' + lg + ' 1 ' + x + ' ' + y + ' Z" fill="' + c + '"/></svg>';
+    }
+    if (state === "blocked") {
+      return '<svg class="si" width="' + s + '" height="' + s + '" aria-hidden="true"><circle cx="' + cx + '" cy="' + cx + '" r="' + r + '" fill="none" stroke="' + c + '" stroke-width="1.5"/><rect x="' + (cx - 2.6) + '" y="' + (cx - 2.6) + '" width="1.8" height="5.2" rx=".6" fill="' + c + '"/><rect x="' + (cx + 0.8) + '" y="' + (cx - 2.6) + '" width="1.8" height="5.2" rx=".6" fill="' + c + '"/></svg>';
+    }
+    if (state === "done") {
+      return '<svg class="si" width="' + s + '" height="' + s + '" aria-hidden="true"><circle cx="' + cx + '" cy="' + cx + '" r="' + (r + 0.75) + '" fill="' + c + '"/><path d="M' + (cx - 3) + ' ' + cx + ' l2 2 l4 -4.2" fill="none" stroke="var(--surf)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+    }
+    if (state === "failed") {
+      return '<svg class="si" width="' + s + '" height="' + s + '" aria-hidden="true"><circle cx="' + cx + '" cy="' + cx + '" r="' + (r + 0.75) + '" fill="' + c + '"/><path d="M' + (cx - 2.4) + ' ' + (cx - 2.4) + ' l4.8 4.8 M' + (cx + 2.4) + ' ' + (cx - 2.4) + ' l-4.8 4.8" stroke="var(--surf)" stroke-width="1.6" stroke-linecap="round"/></svg>';
+    }
+    if (state === "abandoned") {
+      return '<svg class="si" width="' + s + '" height="' + s + '" aria-hidden="true"><circle cx="' + cx + '" cy="' + cx + '" r="' + r + '" fill="none" stroke="var(--abandoned)" stroke-width="1.5"/><path d="M' + (cx - 3) + ' ' + cx + ' H' + (cx + 3) + '" stroke="var(--abandoned)" stroke-width="1.6" stroke-linecap="round"/></svg>';
+    }
+    return '<svg class="si" width="' + s + '" height="' + s + '" aria-hidden="true"><path d="M' + cx + ' 1.5 L' + (s - 1) + ' ' + (s - 2) + ' L1 ' + (s - 2) + ' Z" fill="var(--stalled)"/><rect x="' + (cx - 0.8) + '" y="' + (cx - 2) + '" width="1.6" height="4" rx=".6" fill="var(--surf)"/><circle cx="' + cx + '" cy="' + (s - 4.3) + '" r=".9" fill="var(--surf)"/></svg>';
+  }
+
+  function initials(name) {
+    var raw = String(name || "").trim();
+    if (!raw) return "?";
+    var words = raw.split(/\s+/);
+    if (words.length >= 2) return (words[0].charAt(0) + words[1].charAt(0)).toUpperCase();
+    var parts = raw.match(/[A-Z]+(?![a-z])|[A-Z]?[a-z0-9]+/g);
+    if (parts && parts.length >= 2) return (parts[0].charAt(0) + parts[1].charAt(0)).toUpperCase();
+    return raw.slice(0, 2).toUpperCase();
+  }
+
+  function agentColor(name) {
+    var h = 2166136261;
+    var s = String(name || "");
+    for (var i = 0; i < s.length; i++) {
+      h ^= s.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    return PALETTE[(h >>> 0) % PALETTE.length];
+  }
+
+  function avatar(name, size) {
+    var px = size || 20;
+    var fs = Math.max(9, Math.round(px * 0.46));
+    return '<span class="avatar" style="background:' + agentColor(name) + ';width:' + px + 'px;height:' + px + 'px;font-size:' + fs + 'px" aria-hidden="true">' + esc(initials(name)) + '</span>';
+  }
+
+  function agentHref(name) {
+    return "#/agent/" + encodeURIComponent(name);
+  }
+
+  function jobHref(agent, jobId) {
+    return "#/job/" + encodeURIComponent(agent) + "/" + encodeURIComponent(jobId);
+  }
+
+  function pctOf(job) {
+    var n = Number(job.progress);
+    if (!Number.isFinite(n)) return 0;
+    return Math.max(0, Math.min(100, Math.round(n)));
+  }
+
+  function serverNow() { return Date.now() + offset; }
+
+  function fmtElapsed(sec) {
+    sec = Math.max(0, sec | 0);
+    var h = Math.floor(sec / 3600);
+    var m = Math.floor((sec % 3600) / 60);
+    var s = sec % 60;
+    if (h > 0) return h + "h " + m + "m";
+    if (m > 0) return m + "m " + s + "s";
+    return s + "s";
+  }
+
+  function elapsedBetween(start, end) {
+    var a = Date.parse(start);
+    if (Number.isNaN(a)) return 0;
+    var b = serverNow();
+    if (end) {
+      var parsed = Date.parse(end);
+      if (!Number.isNaN(parsed)) b = parsed;
+    }
+    return Math.max(0, Math.floor((b - a) / 1000));
+  }
+
+  function endOf(job) {
+    if ((job.state === "done" || job.state === "failed") && job.finished_at) return job.finished_at;
+    return "";
+  }
+
+  function ago(ts) {
+    var then = Date.parse(ts);
+    if (Number.isNaN(then)) return "";
+    return fmtElapsed(Math.max(0, Math.floor((serverNow() - then) / 1000))) + " ago";
+  }
+
+  function fmtAbs(ts) {
+    var d = new Date(ts);
+    if (Number.isNaN(d.getTime())) return "";
+    return d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+  }
+
+  function jobTTL(job) {
+    var ttl = Number(job.ttl);
+    if (Number.isFinite(ttl) && ttl >= 0) return ttl;
+    return 600;
+  }
+
+  function takeSeconds(data, key, current) {
+    if (!data || !Object.prototype.hasOwnProperty.call(data, key) || data[key] == null) return current;
+    var n = Number(data[key]);
+    if (!Number.isFinite(n) || n < 0) return current;
+    return n;
+  }
+
+  function abandonLimitSeconds(job) {
+    if (!job) return null;
+    if (job.state === "running") {
+      if (!(abandonAfterSeconds > 0)) return null;
+      var ttl = jobTTL(job);
+      var four = ttl > 0 ? ttl * 4 : 0;
+      return Math.max(abandonAfterSeconds, four);
+    }
+    if (job.state === "queued" || job.state === "blocked") {
+      if (!(abandonWaitingAfterSeconds > 0)) return null;
+      return abandonWaitingAfterSeconds;
+    }
+    return null;
+  }
+
+  function isAbandoned(job) {
+    if (!job || job.state === "done" || job.state === "failed") return false;
+    var updated = Date.parse(job.updated_at);
+    if (Number.isNaN(updated)) return !!job.abandoned;
+    var limit = abandonLimitSeconds(job);
+    if (limit == null) return false;
+    return (serverNow() - updated) / 1000 > limit;
+  }
+
+  function abandonedAtISO(job) {
+    var updated = Date.parse(job && job.updated_at);
+    var limit = abandonLimitSeconds(job);
+    if (!Number.isNaN(updated) && limit != null) return new Date(updated + limit * 1000).toISOString();
+    return job && job.abandoned_at ? job.abandoned_at : "";
+  }
+
+  function abandonedText(job) {
+    if (!isAbandoned(job)) return "No";
+    var label = fmtAbs(abandonedAtISO(job));
+    if (!label) return "Yes";
+    return "Yes, since " + label;
+  }
+
+  function isStalled(job) {
+    if (isAbandoned(job)) return false;
+    if (!job || job.state !== "running") return false;
+    var updated = Date.parse(job.updated_at);
+    if (Number.isNaN(updated)) return !!job.stalled;
+    return (serverNow() - updated) / 1000 > jobTTL(job);
+  }
+
+  function statusWord(job) {
+    if (isAbandoned(job)) return "abandoned";
+    if (isStalled(job)) return "stalled";
+    return knownState(job.state);
+  }
+
+  function statusHTML(job) {
+    var word = statusWord(job);
+    return '<span class="word ' + word + '">' + esc((LABELS[word] || word).toUpperCase()) + "</span>";
+  }
+
+  function foldKey(id) {
+    return id === "done" ? "statuspan-expand-done" : "statuspan-expand-queued";
+  }
+
+  function foldOpen(key) {
+    try { return localStorage.getItem(key) === "1"; } catch (e) { return false; }
+  }
+
+  function setFold(key, open) {
+    try { localStorage.setItem(key, open ? "1" : "0"); } catch (e) {}
+  }
+
+  function byUpdatedAsc(a, b) {
+    var d = Date.parse(a.updated_at) - Date.parse(b.updated_at);
+    if (d) return d;
+    if (a.agent !== b.agent) return a.agent < b.agent ? -1 : 1;
+    if (a.job_id !== b.job_id) return a.job_id < b.job_id ? -1 : 1;
+    return 0;
+  }
+
+  function byUpdatedDesc(a, b) { return byUpdatedAsc(b, a); }
+
+  function partitionBoard() {
+    var attention = [];
+    var progress = [];
+    var queued = [];
+    var done = [];
+    jobs.forEach(function (job) {
+      var word = statusWord(job);
+      if (word === "failed" || word === "blocked" || word === "stalled" || word === "abandoned") attention.push(job);
+      else if (word === "running") progress.push(job);
+      else if (job.state === "queued") queued.push(job);
+      else if (job.state === "done") done.push(job);
+    });
+    attention.sort(function (a, b) {
+      var d = SEV[statusWord(a)] - SEV[statusWord(b)];
+      if (d) return d;
+      return byUpdatedAsc(a, b);
+    });
+    progress.sort(byUpdatedDesc);
+    queued.sort(byUpdatedDesc);
+    done.sort(byUpdatedDesc);
+    return { attention: attention, progress: progress, queued: queued, done: done };
+  }
+
+  function barColor(job) {
+    if (isAbandoned(job)) return "var(--abandoned)";
+    return "var(--" + (isStalled(job) ? "stalled" : knownState(job.state)) + ")";
+  }
+
+  function stalledTag(job) {
+    if (!isStalled(job)) return "";
+    return '<span class="pill stalled">' + icon("stalled", 0, 11) + " STALLED</span>";
+  }
+
+  function abandonedTag(job) {
+    if (!isAbandoned(job)) return "";
+    return '<span class="pill abandoned">' + icon("abandoned", 0, 11) + " ABANDONED</span>";
+  }
+
+  function pill(state) {
+    if (!Object.prototype.hasOwnProperty.call(LABELS, state) || state === "stalled") {
+      return '<span class="pill">' + esc(state || "unknown") + "</span>";
+    }
+    return '<span class="pill ' + state + '">' + icon(state, 50, 11) + " " + LABELS[state] + "</span>";
+  }
+
+  function linkAnchor(url, inner, label) {
+    var href = safeHref(url);
+    if (!href) return "";
+    return '<a href="' + esc(href) + '" target="_blank" rel="noopener noreferrer" aria-label="' + esc(label || "Open link") + '">' + inner + "</a>";
+  }
+
+  function decodePart(s) {
+    try { return decodeURIComponent(s); } catch (e) { return s; }
+  }
+
+  function parseRoute() {
+    var h = location.hash || "";
+    if (h.charAt(0) === "#") h = h.slice(1);
+    if (h === "" || h === "/") return { name: "board" };
+    var agentPrefix = "/agent/";
+    if (h === "/agent" || h === "/agent/") return { name: "agent", agent: "" };
+    if (h.slice(0, agentPrefix.length) === agentPrefix) {
+      return { name: "agent", agent: decodePart(h.slice(agentPrefix.length)) };
+    }
+    var jobPrefix = "/job/";
+    if (h === "/job" || h === "/job/") return { name: "job", agent: "", jobId: "" };
+    if (h.slice(0, jobPrefix.length) === jobPrefix) {
+      var rest = h.slice(jobPrefix.length);
+      var slash = rest.indexOf("/");
+      if (slash < 0) return { name: "job", agent: decodePart(rest), jobId: "" };
+      return { name: "job", agent: decodePart(rest.slice(0, slash)), jobId: decodePart(rest.slice(slash + 1)) };
+    }
+    return { name: "unknown" };
+  }
+
+  function addEvents(list) {
+    (list || []).forEach(function (ev) {
+      if (!ev || ev.n == null) return;
+      events.set(ev.n, ev);
+    });
+  }
+
+  function eventsFor(agent, jobId) {
+    var out = [];
+    events.forEach(function (ev) {
+      if (ev.agent !== agent) return;
+      if (jobId && ev.job_id !== jobId) return;
+      out.push(ev);
+    });
+    return out;
+  }
+
+  function annotate(list) {
+    var chrono = list.slice().sort(function (a, b) {
+      return (a.n - b.n) || (Date.parse(a.ts) - Date.parse(b.ts));
+    });
+    var prev = new Map();
+    var titles = new Map();
+    var rows = chrono.map(function (ev) {
+      var before = prev.get(ev.job_id) || "";
+      if (ev.title) titles.set(ev.job_id, ev.title);
+      var title = ev.title || titles.get(ev.job_id) || ev.job_id;
+      var label = "Updated";
+      var iconState = before || "queued";
+      if (ev.applied === false) {
+        label = (ev.state && LABELS[ev.state] ? LABELS[ev.state] : "Update") + " · not applied";
+        iconState = ev.state || before || "queued";
+      } else if (ev.kind === "delete") {
+        label = "Deleted";
+        iconState = "failed";
+        prev.delete(ev.job_id);
+      } else {
+        var next = ev.state || before;
+        if (ev.state && ev.state !== before) {
+          var from = before && LABELS[before] ? LABELS[before] : "";
+          var to = LABELS[ev.state] || ev.state;
+          label = from ? from + " → " + to : to;
+          iconState = ev.state;
+        } else if (ev.progress != null && Number.isFinite(Number(ev.progress))) {
+          label = "Progress " + pctOf({ progress: ev.progress }) + "%";
+          iconState = next || "running";
+        } else if (ev.note) {
+          label = "Note";
+          iconState = next || "queued";
+        }
+        if (next) prev.set(ev.job_id, next);
+      }
+      return { ev: ev, title: title, label: label, iconState: iconState };
+    });
+    rows.reverse();
+    return rows;
+  }
+
+  function renderTimeline(list) {
+    if (!list.length) return '<p class="empty">No activity yet</p>';
+    return annotate(list).map(function (row) {
+      var ev = row.ev;
+      var note = ev.note ? '<div class="note">' + esc(ev.note) + "</div>" : "";
+      var prog = "";
+      if (ev.progress != null && Number.isFinite(Number(ev.progress)) && row.label.indexOf("Progress ") !== 0) {
+        prog = '<div class="tm">' + pctOf({ progress: ev.progress }) + "%</div>";
+      }
+      var when = fmtAbs(ev.ts);
+      return '<div class="ev">' + icon(row.iconState, ev.progress || 0, 13) +
+        '<div><div><b>' + esc(row.title) + '</b> <span class="w">' + esc(row.label) + "</span></div>" +
+        '<div class="tm"><span class="mono">' + esc(ev.job_id) + "</span> · <time datetime=\"" + esc(ev.ts || "") + '">' + esc(when) + '</time> · <span data-ago="' + esc(ev.ts || "") + '">' + esc(ago(ev.ts)) + "</span></div>" +
+        prog + note + "</div></div>";
+    }).join("");
+  }
+
+  function elapsedHTML(job) {
+    var end = endOf(job);
+    var sec = elapsedBetween(job.started_at, end);
+    return '<span data-elapsed-start="' + esc(job.started_at || "") + '" data-elapsed-end="' + esc(end) + '"><span class="sr">Elapsed </span><span data-elapsed-val>' + esc(fmtElapsed(sec)) + "</span></span>";
+  }
+
+  function updatedHTML(job) {
+    return '<span data-ago="' + esc(job.updated_at || "") + '" data-ago-kind="upd">updated ' + esc(ago(job.updated_at)) + "</span>";
+  }
+
+  function findJob(agent, jobId) {
+    for (var i = 0; i < jobs.length; i++) {
+      if (jobs[i].agent === agent && jobs[i].job_id === jobId) return jobs[i];
+    }
+    return null;
+  }
+
+  function boardSelected(route) {
+    if (!route || route.name !== "job" || !route.agent || !route.jobId) return null;
+    return { agent: route.agent, jobId: route.jobId };
+  }
+
+  function renderBoardRow(job, sel) {
+    var pct = pctOf(job);
+    var on = !!(sel && sel.agent === job.agent && sel.jobId === job.job_id);
+    var title = job.title || job.job_id;
+    var mark = isAbandoned(job) ? " is-abandoned" : (isStalled(job) ? " is-stalled" : "");
+    return '<div class="brow' + (on ? " sel" : "") + mark + '" role="button" tabindex="0" data-board-row="1" data-agent="' + esc(job.agent) + '" data-job-id="' + esc(job.job_id) + '" aria-pressed="' + (on ? "true" : "false") + '">' +
+      '<span class="b-bot"><span class="who">' + avatar(job.agent, 18) + "<span>" + esc(job.agent) + "</span></span></span>" +
+      '<span class="b-title" title="' + esc(title) + '">' + esc(title) + "</span>" +
+      '<span class="b-status">' + statusHTML(job) + "</span>" +
+      '<span class="b-prog prog"><span class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="' + pct + '" aria-label="Progress"><i style="width:' + pct + "%;background:" + barColor(job) + '"></i></span><span class="pct">' + pct + "%</span></span>" +
+      '<span class="b-upd" data-ago="' + esc(job.updated_at || "") + '">' + esc(ago(job.updated_at)) + "</span></div>";
+  }
+
+  function renderBoardHead() {
+    return '<div class="brow brow-h"><span>Bot</span><span>Title</span><span>Status</span><span class="b-prog">Progress</span><span class="b-upd">Updated</span></div>';
+  }
+
+  function rowsHTML(list, sel) {
+    return list.map(function (job) { return renderBoardRow(job, sel); }).join("");
+  }
+
+  function sectionBlock(id, title, rows) {
+    return '<section class="bsec" data-board-section="' + id + '" aria-labelledby="sec-' + id + '">' +
+      '<h2 class="sh" id="sec-' + id + '">' + esc(title) + "</h2>" + rows + "</section>";
+  }
+
+  function foldBlock(id, title, list, sel) {
+    var open = foldOpen(foldKey(id));
+    var rows = open ? rowsHTML(list, sel) : "";
+    return '<section class="bsec" data-board-section="' + id + '">' +
+      '<button type="button" class="fold" data-fold="' + id + '" aria-expanded="' + (open ? "true" : "false") + '">' +
+      '<span class="tri" aria-hidden="true">' + (open ? "▾" : "▸") + "</span><span>" + esc(title) + '</span> <span class="n">' + list.length + "</span></button>" +
+      rows + "</section>";
+  }
+
+  function missingPanel(title, body) {
+    return '<div class="missing"><h1>' + esc(title) + "</h1><p>" + esc(body) + '</p><a class="back" href="#/">← Board</a></div>';
+  }
+
+  function historyFeed(history, historyNote) {
+    var body = historyNote ? '<p class="empty">' + esc(historyNote) + "</p>" : "";
+    if (!historyNote || history.length) body += renderTimeline(history);
+    return '<div class="feed" data-scroll="panel">' + body + "</div>";
+  }
+
+  function renderJobAside(route) {
+    var head = '<div class="ph"><span>Job</span><button type="button" class="btn x" data-close-job="1" aria-label="Close details"><span aria-hidden="true">×</span></button></div>';
+    if (!route.agent || !route.jobId) {
+      return '<aside class="panel">' + head + missingPanel("Job not found", "That address did not include a bot and a job.") + "</aside>";
+    }
+    if (!sawSnapshot) {
+      return '<aside class="panel">' + head + '<div class="feed" data-scroll="panel"><p class="empty">Loading activity…</p></div></aside>';
+    }
+    var job = findJob(route.agent, route.jobId);
+    if (!job) {
+      return '<aside class="panel">' + head + missingPanel("Job not found", "No current job " + route.jobId + " for " + route.agent + ".") + "</aside>";
+    }
+    var loaded = agentLoaded.has(route.agent);
+    var failed = agentError.has(route.agent) && !loaded;
+    var note = "";
+    if (!loaded && !failed) note = "Loading activity…";
+    else if (failed) note = "Couldn't load the full history. Showing what is live.";
+    return '<aside class="panel">' + head + renderDetail(job, eventsFor(route.agent, route.jobId), note) + "</aside>";
+  }
+
+  function renderBoard(route) {
+    var sel = boardSelected(route);
+    if (sel) {
+      var openJob = findJob(sel.agent, sel.jobId);
+      var openWord = openJob ? statusWord(openJob) : "";
+      if (openWord === "queued" || openWord === "done") setFold(foldKey(openWord), true);
+    }
+    var parts = partitionBoard();
+    var queuedOpen = parts.queued.length && foldOpen(foldKey("queued"));
+    var doneOpen = parts.done.length && foldOpen(foldKey("done"));
+    var showHead = parts.attention.length || parts.progress.length || queuedOpen || doneOpen;
+    var html = "";
+    if (showHead) html += renderBoardHead();
+    if (parts.attention.length) html += sectionBlock("attention", "Needs attention", rowsHTML(parts.attention, sel));
+    if (parts.progress.length) html += sectionBlock("progress", "In progress", rowsHTML(parts.progress, sel));
+    if (parts.queued.length) html += foldBlock("queued", "Queued", parts.queued, sel);
+    if (parts.done.length) html += foldBlock("done", "Done", parts.done, sel);
+    if (!html) html = '<p class="empty">No jobs</p>';
+    var split = !!(route && route.name === "job");
+    return '<div class="board' + (split ? " has-detail" : "") + '"><h1 class="sr">Board</h1><div class="board-frame' + (split ? " split" : "") + '"><div class="board-main"><div class="blist" data-scroll="jobs">' + html + "</div></div>" +
+      (split ? renderJobAside(route) : "") + "</div></div>";
+  }
+
+  function countBits(list) {
+    var active = list.filter(function (j) { return !isAbandoned(j); });
+    var c = {};
+    active.forEach(function (j) { c[j.state] = (c[j.state] || 0) + 1; });
+    var html = ["running", "blocked", "queued", "failed", "done"].filter(function (s) { return c[s]; }).map(function (s) {
+      return '<span class="bit">' + icon(s, 50, 11) + " " + c[s] + " " + s + "</span>";
+    }).join("");
+    var stalled = active.filter(isStalled).length;
+    if (stalled) html += '<span class="bit">' + icon("stalled", 0, 11) + " " + stalled + " stalled</span>";
+    var abandoned = list.length - active.length;
+    if (abandoned) html += '<span class="bit abandon-n">' + icon("abandoned", 0, 11) + " " + abandoned + " abandoned</span>";
+    return html;
+  }
+
+  function renderDetail(job, history, historyNote) {
+    var pct = pctOf(job);
+    var href = safeHref(job.link);
+    var link = href ? linkAnchor(job.link, esc(job.link) + " ↗", "Open link") : '<span class="faint">None</span>';
+    var seq = job.seq == null ? "—" : esc(String(job.seq));
+    var finished = job.finished_at ? esc(fmtAbs(job.finished_at)) : "—";
+    return '<div class="detail"><div class="kicker">' + pill(job.state) + stalledTag(job) + abandonedTag(job) + "</div>" +
+      "<h2>" + esc(job.title || job.job_id) + "</h2>" +
+      '<div class="kv">' +
+      "<span>Bot</span><span><a href=\"" + agentHref(job.agent) + "\">" + esc(job.agent) + "</a></span>" +
+      "<span>Job</span><span class=\"mono\">" + esc(job.job_id) + "</span>" +
+      "<span>Progress</span><span>" + pct + "%</span>" +
+      "<span>Note</span><span>" + (job.note ? esc(job.note) : "—") + "</span>" +
+      "<span>Link</span><span>" + link + "</span>" +
+      "<span>Seq</span><span>" + seq + "</span>" +
+      "<span>TTL</span><span>" + esc(String(job.ttl == null ? "" : job.ttl)) + "s</span>" +
+      "<span>Started</span><span>" + esc(fmtAbs(job.started_at)) + "</span>" +
+      "<span>Updated</span><span>" + esc(fmtAbs(job.updated_at)) + " · " + updatedHTML(job) + "</span>" +
+      "<span>Finished</span><span>" + finished + "</span>" +
+      "<span>Elapsed</span><span>" + elapsedHTML(job) + "</span>" +
+      "<span>Stalled</span><span>" + (isStalled(job) ? "Yes" : "No") + "</span>" +
+      "<span>Abandoned</span><span>" + esc(abandonedText(job)) + "</span>" +
+      "</div></div>" +
+      '<div class="ph">History</div>' + historyFeed(history || [], historyNote || "");
+  }
+
+  function renderRow(job) {
+    var pct = pctOf(job);
+    var sel = selectedJob === job.job_id;
+    var note = job.note ? "<em>" + esc(job.note) + "</em>" : "";
+    var ext = linkAnchor(job.link, "↗", "Open link");
+    return '<div class="row' + (sel ? " sel" : "") + (isAbandoned(job) ? " is-abandoned" : "") + '" role="button" tabindex="0" data-job-id="' + esc(job.job_id) + '" aria-pressed="' + (sel ? "true" : "false") + '">' +
+      icon(knownState(job.state), pct, 14) +
+      '<span class="sr">' + esc(LABELS[job.state] || job.state) + "</span>" +
+      '<span class="id mono">' + esc(job.job_id) + "</span>" +
+      '<span class="t"><b>' + esc(job.title || job.job_id) + "</b>" + stalledTag(job) + abandonedTag(job) + note + "</span>" +
+      '<span class="prog"><span class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="' + pct + '"><i style="width:' + pct + "%;background:" + barColor(job) + '"></i></span>' + pct + "%</span>" +
+      '<span class="el">' + elapsedHTML(job) + "</span>" +
+      '<span class="up" data-ago="' + esc(job.updated_at || "") + '">' + esc(ago(job.updated_at)) + "</span>" +
+      (ext || "<span></span>") + "</div>";
+  }
+
+  function missingHTML(title, body) {
+    return '<div class="missing"><h1>' + esc(title) + "</h1><p>" + body + '</p><a class="back" href="#/">← Board</a></div>';
+  }
+
+  function renderAgent(agent) {
+    if (!agent) return missingHTML("Unknown bot", "The address did not include a bot name.");
+    var mine = jobs.filter(function (j) { return j.agent === agent; });
+    mine.sort(function (a, b) {
+      var d = (RANK[a.state] == null ? 9 : RANK[a.state]) - (RANK[b.state] == null ? 9 : RANK[b.state]);
+      if (d) return d;
+      return Date.parse(b.updated_at) - Date.parse(a.updated_at);
+    });
+    var evs = eventsFor(agent);
+    var loaded = agentLoaded.has(agent);
+    var failed = agentError.has(agent) && !loaded;
+    if (loaded && !mine.length && !evs.length) {
+      return missingHTML("No bot named " + agent, "Nothing has reported under this name.");
+    }
+    if (failed && !mine.length && !evs.length) {
+      return missingHTML("Couldn't load " + agent, "The activity feed did not load. The board is still available.");
+    }
+    var selected = selectedJob ? mine.filter(function (j) { return j.job_id === selectedJob; })[0] : null;
+    if (selectedJob && !selected) selectedJob = "";
+    var panelHead = selected
+      ? '<div class="ph"><span>Job</span><button type="button" class="btn" data-clear-job="1"><span aria-hidden="true">×</span> All activity</button></div>'
+      : '<div class="ph">Activity</div>';
+    var panelBody = "";
+    if (selected) {
+      panelBody = renderDetail(selected, eventsFor(agent, selected.job_id));
+    } else if (!loaded && !failed) {
+      panelBody = '<div class="feed" data-scroll="panel"><p class="empty">Loading activity…</p>' + renderTimeline(evs) + "</div>";
+    } else if (failed) {
+      panelBody = '<div class="feed" data-scroll="panel"><p class="empty">Couldn\'t load the full history. Showing what is live.</p>' + renderTimeline(evs) + "</div>";
+    } else {
+      panelBody = '<div class="feed" data-scroll="panel">' + renderTimeline(evs) + "</div>";
+    }
+    var rows = mine.length ? mine.map(renderRow).join("") : '<p class="empty">No current jobs</p>';
+    return '<div class="agent-page"><div class="agent-main"><div class="sub"><a class="back" href="#/">← Board</a>' +
+      avatar(agent, 22) + "<h1>" + esc(agent) + '</h1><div class="counts">' + countBits(mine) + "</div></div>" +
+      '<div class="list" data-scroll="jobs">' + rows + "</div></div>" +
+      '<aside class="panel">' + panelHead + panelBody + "</aside></div>";
+  }
+
+  function docTitle(route) {
+    var n = jobs.filter(isStalled).length;
+    var t = "StatusPan";
+    if (route.name === "agent" && route.agent) t = route.agent + " — StatusPan";
+    if (route.name === "job") {
+      var job = findJob(route.agent, route.jobId);
+      var label = job ? (job.title || job.job_id) : (route.jobId || "Job");
+      t = label + " — StatusPan";
+    }
+    if (n) t = "(" + n + ") " + t;
+    return t;
+  }
+
+  function focusToken(el) {
+    if (!el || !el.getAttribute) return "";
+    if (el.id === "tt") return "theme";
+    if (el.hasAttribute("data-job-id")) return "job:" + (el.getAttribute("data-agent") || "") + "\0" + el.getAttribute("data-job-id");
+    if (el.hasAttribute("data-filter-agent")) return "agent:" + el.getAttribute("data-filter-agent");
+    if (el.hasAttribute("data-filter-all")) return "all";
+    if (el.hasAttribute("data-toggle-older")) return "older";
+    if (el.hasAttribute("data-clear-job")) return "clear";
+    if (el.hasAttribute("data-close-job")) return "close-job";
+    return "";
+  }
+
+  function restoreFocus(token) {
+    if (!token) return;
+    var found = null;
+    if (token === "theme") found = document.getElementById("tt");
+    else if (token === "all") found = document.querySelector("[data-filter-all]");
+    else if (token === "older") found = document.querySelector("[data-toggle-older]");
+    else if (token === "clear") found = document.querySelector("[data-clear-job]");
+    else if (token === "close-job") found = document.querySelector("[data-close-job]");
+    else if (token.indexOf("job:") === 0) {
+      var rest = token.slice(4);
+      var cut = rest.indexOf("\0");
+      var ag = cut >= 0 ? rest.slice(0, cut) : "";
+      var id = cut >= 0 ? rest.slice(cut + 1) : rest;
+      document.querySelectorAll("[data-job-id]").forEach(function (el) {
+        if (found) return;
+        if (el.getAttribute("data-job-id") !== id) return;
+        var elAg = el.getAttribute("data-agent") || "";
+        if (ag && elAg !== ag) return;
+        found = el;
+      });
+    } else if (token.indexOf("agent:") === 0) {
+      var name = token.slice(6);
+      document.querySelectorAll("[data-filter-agent]").forEach(function (el) {
+        if (!found && el.getAttribute("data-filter-agent") === name) found = el;
+      });
+    }
+    if (found) found.focus();
+  }
+
+  function fillTimes(root) {
+    root.querySelectorAll("[data-ago]").forEach(function (el) {
+      var rel = ago(el.getAttribute("data-ago"));
+      el.textContent = el.getAttribute("data-ago-kind") === "upd" ? "updated " + rel : rel;
+    });
+    root.querySelectorAll("[data-elapsed-val]").forEach(function (el) {
+      var host = el.closest("[data-elapsed-start]");
+      if (!host) return;
+      el.textContent = fmtElapsed(elapsedBetween(host.getAttribute("data-elapsed-start"), host.getAttribute("data-elapsed-end") || ""));
+    });
+  }
+
+  function stallKey() {
+    return jobs.map(function (j) {
+      return j.agent + "\0" + j.job_id + (isStalled(j) ? "1" : "0") + (isAbandoned(j) ? "A" : "-");
+    }).join("\n");
+  }
+
+  function render() {
+    var scrolls = new Map();
+    document.querySelectorAll("[data-scroll]").forEach(function (el) {
+      scrolls.set(el.getAttribute("data-scroll"), el.scrollTop);
+    });
+    var focus = focusToken(document.activeElement);
+    var route = parseRoute();
+    var app = document.getElementById("app");
+    if (route.name === "agent") app.innerHTML = renderAgent(route.agent);
+    else if (route.name === "unknown") app.innerHTML = missingHTML("Page not found", "That address is not a board or a bot.");
+    else app.innerHTML = renderBoard(route);
+    document.title = docTitle(route);
+    document.querySelectorAll("[data-scroll]").forEach(function (el) {
+      var top = scrolls.get(el.getAttribute("data-scroll"));
+      if (top) el.scrollTop = top;
+    });
+    restoreFocus(focus);
+    syncAgentFetch();
+    lastStall = stallKey();
+  }
+
+  function syncAgentFetch() {
+    var route = parseRoute();
+    var agent = (route.name === "agent" || route.name === "job") ? (route.agent || "") : "";
+    if (!agent) {
+      loadedAgent = "";
+      fetchGen++;
+      return;
+    }
+    if (agentLoaded.has(agent)) {
+      loadedAgent = agent;
+      return;
+    }
+    if (loadedAgent === agent) return;
+    loadedAgent = agent;
+    var token = ++fetchGen;
+    fetch("/api/events?agent=" + encodeURIComponent(agent))
+      .then(function (r) {
+        if (!r.ok) throw new Error(String(r.status));
+        return r.json();
+      })
+      .then(function (data) {
+        if (token !== fetchGen) return;
+        addEvents(data.events || []);
+        agentError.delete(agent);
+        agentLoaded.add(agent);
+        render();
+      })
+      .catch(function () {
+        if (token !== fetchGen) return;
+        agentError.add(agent);
+        render();
+      });
+  }
+
+  function setNow(iso) {
+    var server = Date.parse(iso);
+    if (!Number.isNaN(server)) offset = server - Date.now();
+  }
+
+  function applySnapshot(data) {
+    sawSnapshot = true;
+    setNow(data.now);
+    abandonAfterSeconds = takeSeconds(data, "abandon_after_seconds", abandonAfterSeconds);
+    abandonWaitingAfterSeconds = takeSeconds(data, "abandon_waiting_after_seconds", abandonWaitingAfterSeconds);
+    jobs = Array.isArray(data.jobs) ? data.jobs : [];
+    events = new Map();
+    addEvents(data.events || []);
+    jobs.forEach(function (j) { addEvents(j.history || []); });
+    agentLoaded = new Set();
+    agentError = new Set();
+    loadedAgent = "";
+  }
+
+  function applyJob(job) {
+    sawSnapshot = true;
+    if (job.deleted) {
+      jobs = jobs.filter(function (j) { return j.agent !== job.agent || j.job_id !== job.job_id; });
+      if (selectedJob === job.job_id) {
+        var route = parseRoute();
+        if (route.agent === job.agent) selectedJob = "";
+      }
+    } else {
+      var i = -1;
+      for (var n = 0; n < jobs.length; n++) {
+        if (jobs[n].agent === job.agent && jobs[n].job_id === job.job_id) i = n;
+      }
+      if (i >= 0) jobs[i] = job;
+      else jobs.push(job);
+    }
+    addEvents(job.history || []);
+  }
+
+  function clockOf(ms) {
+    var d = new Date(ms);
+    if (Number.isNaN(d.getTime())) return "—";
+    return d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  }
+
+  function noteHealth() {
+    var el = document.getElementById("conn");
+    if (!el) return;
+    var open = !!(es && es.readyState === EventSource.OPEN);
+    var bad = fetchFailed || !open || awaitRefetch;
+    var stale = false;
+    if (!bad) unhealthySince = 0;
+    else {
+      if (!unhealthySince) unhealthySince = Date.now();
+      if (Date.now() - unhealthySince > 10000) stale = true;
+    }
+    if (stale) {
+      el.className = "live warn";
+      el.textContent = "Offline / last updated " + (lastOk ? clockOf(lastOk) : "—");
+      return;
+    }
+    el.className = "live";
+    el.textContent = lastOk ? "Updated " + clockOf(lastOk) : "Live";
+  }
+
+  function markOk() {
+    dataSerial++;
+    lastOk = Date.now();
+    fetchFailed = false;
+    awaitRefetch = false;
+    noteHealth();
+  }
+
+  function refetchJobs() {
+    var serial = dataSerial;
+    return fetch("/api/jobs").then(function (r) {
+      if (!r.ok) throw new Error(String(r.status));
+      return r.json();
+    }).then(function (data) {
+      if (dataSerial !== serial) return;
+      applySnapshot(data);
+      markOk();
+      render();
+    }).catch(function () {
+      if (dataSerial !== serial) return;
+      fetchFailed = true;
+      noteHealth();
+    });
+  }
+
+  function connectStream() {
+    if (es) {
+      es.onopen = null;
+      es.onerror = null;
+      es.close();
+    }
+    var stream = new EventSource("/api/stream");
+    es = stream;
+    stream.onopen = function () {
+      if (es !== stream) return;
+      awaitRefetch = true;
+      noteHealth();
+      refetchJobs();
+    };
+    stream.onerror = function () {
+      if (es !== stream) return;
+      noteHealth();
+    };
+    stream.addEventListener("snapshot", function (e) {
+      if (es !== stream) return;
+      try {
+        applySnapshot(JSON.parse(e.data));
+        markOk();
+        render();
+      } catch (err) {}
+    });
+    stream.addEventListener("job", function (e) {
+      if (es !== stream) return;
+      try {
+        applyJob(JSON.parse(e.data));
+        markOk();
+        render();
+      } catch (err) {}
+    });
+  }
+
+  function onWake() {
+    if (!es || es.readyState === EventSource.CLOSED) connectStream();
+    refetchJobs();
+  }
+
+  function closeMenu() {
+    var menu = document.getElementById("more-menu");
+    var btn = document.getElementById("more");
+    if (menu) menu.setAttribute("hidden", "");
+    if (btn) btn.setAttribute("aria-expanded", "false");
+  }
+
+  function clearAll() {
+    var n = jobs.length;
+    if (!window.confirm("Delete all " + n + " jobs? A backup is saved.")) return;
+    fetch("/api/jobs?confirm=all", { method: "DELETE" }).then(function (r) {
+      if (!r.ok) throw new Error(String(r.status));
+      return r.json();
+    }).then(function () {
+      if (location.hash && location.hash !== "#" && location.hash !== "#/") location.hash = "#/";
+      return refetchJobs();
+    }).catch(function () {
+      window.alert("Couldn't clear the board.");
+    });
+  }
+
+  function openFromRow(row) {
+    if (!row) return;
+    if (row.hasAttribute("data-board-row")) {
+      var agent = row.getAttribute("data-agent") || "";
+      var jobId = row.getAttribute("data-job-id") || "";
+      var route = parseRoute();
+      if (route.name === "job" && route.agent === agent && route.jobId === jobId) return;
+      location.hash = jobHref(agent, jobId);
+      return;
+    }
+    selectedJob = row.getAttribute("data-job-id");
+    render();
+  }
+
+  document.getElementById("app").addEventListener("click", function (e) {
+    if (e.target.closest("a")) return;
+    var fold = e.target.closest("[data-fold]");
+    if (fold) {
+      var id = fold.getAttribute("data-fold");
+      var key = foldKey(id);
+      setFold(key, !foldOpen(key));
+      render();
+      return;
+    }
+    if (e.target.closest("[data-close-job]")) { location.hash = "#/"; return; }
+    if (e.target.closest("[data-clear-job]")) { selectedJob = ""; render(); return; }
+    openFromRow(e.target.closest("[data-job-id]"));
+  });
+
+  document.getElementById("app").addEventListener("keydown", function (e) {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    if (e.target.closest("a,button,input,textarea,select")) return;
+    var row = e.target.closest("[data-job-id]");
+    if (!row) return;
+    e.preventDefault();
+    openFromRow(row);
+  });
+
+  window.addEventListener("hashchange", function () {
+    // Per-bot selection is local. The open board job is #/job/<agent>/<job_id>,
+    // which render() reads, so a live update cannot close that panel.
+    selectedJob = "";
+    render();
+  });
+
+  function readStored() {
+    try { return localStorage.getItem("statuspan-theme"); } catch (e) { return null; }
+  }
+
+  function applyTheme(theme, persist) {
+    var night = theme === "night";
+    document.documentElement.classList.toggle("dark", night);
+    document.documentElement.setAttribute("data-theme", night ? "night" : "day");
+    document.documentElement.style.colorScheme = night ? "dark" : "light";
+    if (persist) {
+      try { localStorage.setItem("statuspan-theme", night ? "night" : "day"); } catch (e) {}
+    }
+    var btn = document.getElementById("tt");
+    if (!btn) return;
+    btn.textContent = night ? "☀︎ Day" : "☾ Night";
+    btn.setAttribute("aria-label", night ? "Switch to day theme" : "Switch to night theme");
+  }
+
+  applyTheme(document.documentElement.classList.contains("dark") ? "night" : "day", false);
+  var mq = window.matchMedia("(prefers-color-scheme: dark)");
+  if (mq.addEventListener) {
+    mq.addEventListener("change", function () {
+      if (readStored()) return;
+      applyTheme(mq.matches ? "night" : "day", false);
+    });
+  }
+  document.getElementById("tt").addEventListener("click", function () {
+    applyTheme(document.documentElement.classList.contains("dark") ? "day" : "night", true);
+  });
+  document.addEventListener("keydown", function (e) {
+    var tag = (e.target && e.target.tagName) || "";
+    var typing = tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || (e.target && e.target.isContentEditable);
+    if (e.key === "Escape") {
+      if (typing) return;
+      var menu = document.getElementById("more-menu");
+      if (menu && !menu.hasAttribute("hidden")) {
+        e.preventDefault();
+        closeMenu();
+        return;
+      }
+      var route = parseRoute();
+      if (route.name === "job") {
+        e.preventDefault();
+        location.hash = "#/";
+      } else if (route.name === "agent" && selectedJob) {
+        e.preventDefault();
+        selectedJob = "";
+        render();
+      }
+      return;
+    }
+    if (e.key !== "t" && e.key !== "T") return;
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    if (typing) return;
+    e.preventDefault();
+    applyTheme(document.documentElement.classList.contains("dark") ? "day" : "night", true);
+  });
+
+  document.getElementById("more").addEventListener("click", function (e) {
+    e.stopPropagation();
+    var menu = document.getElementById("more-menu");
+    var open = menu.hasAttribute("hidden");
+    if (open) menu.removeAttribute("hidden");
+    else menu.setAttribute("hidden", "");
+    this.setAttribute("aria-expanded", open ? "true" : "false");
+  });
+  document.getElementById("clear-all").addEventListener("click", function () {
+    closeMenu();
+    clearAll();
+  });
+  document.addEventListener("click", function (e) {
+    if (e.target.closest("#more") || e.target.closest("#more-menu")) return;
+    closeMenu();
+  });
+  window.addEventListener("focus", onWake);
+  document.addEventListener("visibilitychange", function () {
+    if (document.visibilityState === "visible") onWake();
+  });
+  window.__statuspan = {
+    closeStream: function () {
+      if (!es) return;
+      var old = es;
+      es = null;
+      old.onopen = null;
+      old.onerror = null;
+      old.close();
+      es = old;
+      noteHealth();
+    },
+    reconnect: function () { connectStream(); },
+    refetch: function () { return refetchJobs(); }
+  };
+
+  connectStream();
+  render();
+  setInterval(function () { refetchJobs(); }, 30000);
+  setInterval(function () {
+    noteHealth();
+    var key = stallKey();
+    if (key !== lastStall) { render(); return; }
+    fillTimes(document);
+  }, 1000);
+})();
+</script>
+</body>
+</html>

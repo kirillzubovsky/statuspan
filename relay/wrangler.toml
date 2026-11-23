@@ -1,0 +1,20 @@
+# StatusPan relay. ADMIN_TOKEN is a Worker secret:
+#   wrangler secret put ADMIN_TOKEN
+# Local dev reads it from .dev.vars (gitignored). No custom domains.
+name = "statuspan-relay"
+main = "src/index.ts"
+compatibility_date = "2026-11-21"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = true
+
+[observability]
+enabled = true
+head_sampling_rate = 1
+
+[[durable_objects.bindings]]
+name = "WORKSPACE"
+class_name = "Workspace"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Workspace"]

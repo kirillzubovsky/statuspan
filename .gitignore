@@ -1,0 +1,11 @@
+# built binary
+/statuspan
+
+# local data if the server is pointed at the repo
+/data/
+
+# wrangler deploy temp (no-op worker stub); must not be committed or uploaded
+site/.wrangler/
+
+# Global ~/.gitignore ignores config.*; this source file has no secrets and must be tracked.
+!internal/relay/config.go

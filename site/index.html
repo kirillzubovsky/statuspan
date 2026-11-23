@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="StatusPan is an open-source airport-style board for which AI agent is working on what. One local Go binary. Bots push with one curl.">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#1b1c20">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
+<title>StatusPan — which bot is working on what</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Crect width='20' height='20' rx='6' fill='%238e96f2'/%3E%3Ccircle cx='10' cy='10' r='4' fill='none' stroke='%23222329' stroke-width='2'/%3E%3C/svg%3E">
+<style>
+:root{
+ --bg:#1b1c20;--surf:#222329;--surf2:#2a2b32;--border:#2f3138;--border2:#3a3c44;
+ --text:#e4e5e9;--text2:#a7aab2;--text3:#969aa3;--accent:#8e96f2;--accent-bg:#2c2f4a;
+ --queued:#969aa3;--running:#72a3f5;--blocked:#b8a1f3;--done:#62c088;--failed:#f07f7f;--stalled:#f0a35c;--abandoned:#9aa0a8;
+ --running-bg:#24304a;--blocked-bg:#2f2a45;--done-bg:#203528;--failed-bg:#3d2527;--stalled-bg:#3d2e20;--queued-bg:#2c2d33;--abandoned-bg:#2c2d32;
+ --shadow:0 1px 2px rgba(0,0,0,.25);
+ color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{
+ background:var(--bg);color:var(--text);
+ font:13px/1.45 Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
+ -webkit-font-smoothing:antialiased;font-feature-settings:"cv11","ss01";
+}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.mono{font-family:"SF Mono",ui-monospace,Menlo,"JetBrains Mono",monospace}
+.faint{color:var(--text3)}
+.skip{position:absolute;left:12px;top:-40px;background:var(--surf);color:var(--text);padding:8px 12px;border-radius:6px;z-index:5}
+.skip:focus{top:12px}
+.logo{display:flex;align-items:center;gap:8px;font-weight:650;font-size:14px;letter-spacing:-.01em;color:var(--text)}
+.logo:hover{color:var(--text);text-decoration:none}
+.logo b{width:20px;height:20px;border-radius:6px;background:var(--accent);display:inline-flex;align-items:center;justify-content:center;flex:none}
+.logo b::after{content:"";width:8px;height:8px;border-radius:50%;border:2px solid var(--surf)}
+.live{display:inline-flex;align-items:center;gap:6px;color:var(--text2);font-size:12px}
+.live::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--done);box-shadow:0 0 0 3px var(--done-bg);flex:none}
+.btn{display:inline-flex;align-items:center;height:28px;padding:0 10px;border:1px solid var(--border2);border-radius:6px;background:var(--surf);color:var(--text);box-shadow:var(--shadow)}
+.btn:hover{background:var(--surf2);text-decoration:none}
+.top{min-height:50px;display:flex;align-items:center;border-bottom:1px solid var(--border);background:var(--surf);position:sticky;top:0;z-index:4}
+.top .inner,.wrap{max-width:1120px;margin:0 auto;padding:0 20px}
+.top .inner{width:100%;min-height:50px;display:flex;align-items:center;gap:14px}
+.top .live{margin-left:auto}
+.word{font-size:12px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;white-space:nowrap}
+.word.failed{color:var(--failed)}.word.blocked{color:var(--blocked)}.word.stalled{color:var(--stalled)}.word.abandoned{color:var(--abandoned)}.word.running{color:var(--running)}.word.queued{color:var(--queued)}.word.done{color:var(--done)}
+.sh{display:flex;align-items:center;gap:8px;height:40px;margin:0;padding:0 20px;font-size:11.5px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--text3);background:color-mix(in srgb,var(--surf2) 70%,var(--bg));border-bottom:1px solid var(--border)}
+.panel{background:var(--surf);border-top:1px solid var(--border);border-bottom:1px solid var(--border);margin:18px 0}
+.hero{padding:36px 0 8px}
+.hero h1{margin:0;max-width:18ch;font-size:40px;line-height:1.08;font-weight:650;letter-spacing:-.03em}
+.lede{max-width:68ch;margin:14px 0 0;color:var(--text2);font-size:15px;line-height:1.5}
+.shot{margin:22px 0 0}
+.shot img{display:block;width:100%;height:auto;border:1px solid var(--border);border-radius:10px;background:var(--surf)}
+.brow{display:grid;grid-template-columns:168px minmax(0,1fr) 132px;align-items:center;column-gap:16px;min-height:48px;padding:10px 20px;border-bottom:1px solid var(--border);font-size:14px}
+.brow:last-child{border-bottom:0}
+.brow-h{min-height:32px;font-size:11.5px;font-weight:600;color:var(--text3);padding-top:0;padding-bottom:0}
+.b-title{font-weight:600}
+.b-detail{color:var(--text2);min-width:0}
+.b-status{text-align:right}
+.steps{list-style:none;margin:0;padding:0}
+.steps li{display:grid;grid-template-columns:72px minmax(0,1fr);gap:16px;align-items:start;padding:16px 20px;border-bottom:1px solid var(--border)}
+.steps li:last-child{border-bottom:0}
+.steps .n{font-size:12px;font-weight:700;letter-spacing:.12em;color:var(--text3);padding-top:2px}
+.steps b{display:block;font-size:14px;font-weight:600}
+.steps p{margin:6px 0 0;color:var(--text2)}
+pre{margin:8px 0 0;padding:10px 12px;background:var(--bg);border:1px solid var(--border);border-radius:8px;overflow-x:auto;white-space:pre-wrap;overflow-wrap:break-word;font-family:"SF Mono",ui-monospace,Menlo,"JetBrains Mono",monospace;font-size:12.5px;line-height:1.55;color:var(--text)}
+code{font:inherit}
+.dl{list-style:none;margin:0;padding:0}
+.dl a{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;align-items:center;min-height:48px;padding:10px 20px;border-bottom:1px solid var(--border);color:var(--text);font-size:14px}
+.dl li:last-child a{border-bottom:0}
+.dl a:hover{background:var(--bg);text-decoration:none}
+.dl .file{color:var(--text3);font-size:12px}
+.note{margin:0;padding:12px 20px 16px;color:var(--text2)}
+.foot{display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center;padding:22px 0 40px;color:var(--text3);font-size:12px}
+.foot a{color:var(--text2)}
+@media (max-width:720px){
+ .hero h1{font-size:32px}
+ .brow,.steps li{grid-template-columns:1fr;gap:4px;align-items:start}
+ .brow-h{display:none}
+ .b-status{text-align:left}
+ .top .live{display:none}
+ .dl a{grid-template-columns:1fr}
+}
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="top">
+ <div class="inner">
+  <a class="logo" href="/"><b></b>StatusPan</a>
+  <span class="live">Local board</span>
+  <a class="btn" href="https://github.com/kirillzubovsky/statuspan">GitHub</a>
+ </div>
+</header>
+<main id="main">
+ <div class="wrap">
+  <section class="hero">
+   <h1>Which bot is working on what.</h1>
+   <p class="lede">StatusPan is an open-source, super fast control panel for AI agents. One local Go binary draws an airport departures board. Bots push one way, with one curl. A running job that goes quiet is stalled, then abandoned. A Cloudflare relay is optional if you want to self-host it. A hosted paid version is coming soon.</p>
+   <figure class="shot">
+    <img src="airport-night.png" width="2560" height="1324" alt="StatusPan night board, an airport-style list of fictional bots, jobs, and statuses" fetchpriority="high" decoding="async">
+   </figure>
+  </section>
+
+  <section class="panel" aria-labelledby="what">
+   <h2 class="sh" id="what">What it is</h2>
+   <div class="brow brow-h" aria-hidden="true"><span>Topic</span><span>Detail</span><span>Status</span></div>
+   <div class="brow">
+    <span class="b-title">Open source</span>
+    <span class="b-detail">MIT. The daemon, the board, and the relay protocol are in the repo.</span>
+    <span class="b-status word done">MIT</span>
+   </div>
+   <div class="brow">
+    <span class="b-title">The board</span>
+    <span class="b-detail">Airport departures. Needs attention first, then what is in progress.</span>
+    <span class="b-status word running">Board</span>
+   </div>
+   <div class="brow">
+    <span class="b-title">One way</span>
+    <span class="b-detail">Bots push with one curl. StatusPan does not call them back, and the board does not edit a job.</span>
+    <span class="b-status word running">Push</span>
+   </div>
+   <div class="brow">
+    <span class="b-title">Stalled</span>
+    <span class="b-detail">A running job with no heartbeat for its ttl (default 10 minutes). Other states do not stall.</span>
+    <span class="b-status word stalled">Stalled</span>
+   </div>
+   <div class="brow">
+    <span class="b-title">Abandoned</span>
+    <span class="b-detail">The next step after a longer silence. Derived when the board is read. Bots cannot post it.</span>
+    <span class="b-status word abandoned">Abandoned</span>
+   </div>
+   <div class="brow">
+    <span class="b-title">Local binary</span>
+    <span class="b-detail">One Go binary. Loopback only. <span class="mono">statuspan serve</span> listens on port 4477.</span>
+    <span class="b-status word done">Local</span>
+   </div>
+   <div class="brow">
+    <span class="b-title">Relay</span>
+    <span class="b-detail">Optional. Self-host the Cloudflare Worker. Off-machine bots post there, and the daemon merges them in.</span>
+    <span class="b-status word blocked">Relay</span>
+   </div>
+   <div class="brow">
+    <span class="b-title">Hosted</span>
+    <span class="b-detail">A paid version that runs the relay for you is coming soon. Self-host stays available.</span>
+    <span class="b-status word queued">Soon</span>
+   </div>
+  </section>
+
+  <section class="panel" aria-labelledby="start">
+   <h2 class="sh" id="start">Quick start</h2>
+   <ol class="steps">
+    <li>
+     <span class="n">01</span>
+     <div>
+      <b>Install</b>
+      <pre><code>curl -fsSL https://statuspan.com/install.sh | sh</code></pre>
+      <p>The script detects your OS and architecture, downloads the release binary, and installs it to <span class="mono">~/.local/bin</span>. No sudo.</p>
+     </div>
+    </li>
+    <li>
+     <span class="n">02</span>
+     <div>
+      <b>Serve</b>
+      <pre><code>statuspan serve</code></pre>
+      <p>Starts the local daemon. It refuses any address that is not loopback.</p>
+     </div>
+    </li>
+    <li>
+     <span class="n">03</span>
+     <div>
+      <b>Open</b>
+      <p><a href="http://localhost:4477">http://localhost:4477</a></p>
+     </div>
+    </li>
+   </ol>
+  </section>
+
+  <section class="panel" aria-labelledby="post">
+   <h2 class="sh" id="post">Post your first job</h2>
+   <div class="note">
+    <p>With the daemon running, post the same way a bot would.</p>
+    <pre><code>curl -s -X POST localhost:4477/api/jobs -H 'Content-Type: application/json' -d '{"agent":"MyBot","job_id":"build-1","title":"Build v1","state":"running","progress":40,"link":"https://example.com","seq":1,"ttl":600}'</code></pre>
+    <p>Reload the board. MyBot / build-1 shows as running.</p>
+   </div>
+  </section>
+
+  <section class="panel" aria-labelledby="get">
+   <h2 class="sh" id="get">Download</h2>
+   <p class="note">Direct binaries from the latest GitHub release. These are the files the installer fetches. <span class="mono">chmod +x</span> and move the file to <span class="mono">~/.local/bin/statuspan</span>.</p>
+   <ul class="dl">
+    <li><a href="https://github.com/kirillzubovsky/statuspan/releases/latest/download/statuspan-darwin-arm64">macOS Apple silicon <span class="file mono">statuspan-darwin-arm64</span></a></li>
+    <li><a href="https://github.com/kirillzubovsky/statuspan/releases/latest/download/statuspan-darwin-amd64">macOS Intel <span class="file mono">statuspan-darwin-amd64</span></a></li>
+    <li><a href="https://github.com/kirillzubovsky/statuspan/releases/latest/download/statuspan-linux-amd64">Linux x86_64 <span class="file mono">statuspan-linux-amd64</span></a></li>
+    <li><a href="https://github.com/kirillzubovsky/statuspan/releases/latest/download/statuspan-linux-arm64">Linux arm64 <span class="file mono">statuspan-linux-arm64</span></a></li>
+   </ul>
+  </section>
+
+  <footer class="foot">
+   <span class="logo"><b></b>StatusPan</span>
+   <span>MIT</span>
+   <a href="https://github.com/kirillzubovsky/statuspan">GitHub</a>
+   <span>Hosted relay, paid, coming soon.</span>
+  </footer>
+ </div>
+</main>
+</body>
+</html>

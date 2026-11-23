@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.statuspan.daemon</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>__HOME__/.local/bin/statuspan</string>
+    <string>serve</string>
+    <string>--addr</string><string>127.0.0.1:4477</string>
+    <string>--data</string><string>__HOME__/Library/Application Support/statuspan</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>5</integer>
+  <key>StandardOutPath</key><string>__HOME__/Library/Logs/statuspan.log</string>
+  <key>StandardErrorPath</key><string>__HOME__/Library/Logs/statuspan.log</string>
+</dict>
+</plist>

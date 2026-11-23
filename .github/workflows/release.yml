@@ -1,0 +1,47 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and publish
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Test
+        run: go test ./...
+
+      - name: Build binaries
+        run: |
+          set -eu
+          for spec in darwin/arm64 darwin/amd64 linux/amd64 linux/arm64; do
+            os=${spec%%/*}
+            arch=${spec#*/}
+            CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build -o "statuspan-${os}-${arch}" ./cmd/statuspan
+          done
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          gh release create "$GITHUB_REF_NAME" \
+            statuspan-darwin-arm64 \
+            statuspan-darwin-amd64 \
+            statuspan-linux-amd64 \
+            statuspan-linux-arm64 \
+            --title "$GITHUB_REF_NAME" \
+            --notes "Binaries for ${GITHUB_REF_NAME}. Install with: curl -fsSL https://statuspan.com/install.sh | sh"
