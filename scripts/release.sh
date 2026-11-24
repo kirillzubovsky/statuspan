@@ -155,6 +155,17 @@ notarize_darwin() {
 notarize_darwin "${TMP}/statuspan-darwin-arm64"
 notarize_darwin "${TMP}/statuspan-darwin-amd64"
 
+echo "writing SHA256SUMS"
+(
+  cd "$TMP"
+  shasum -a 256 \
+    statuspan-darwin-arm64 \
+    statuspan-darwin-amd64 \
+    statuspan-linux-amd64 \
+    statuspan-linux-arm64 \
+    > SHA256SUMS
+)
+
 # Re-check immediately before publish so a tag created while signing cannot be overwritten.
 refuse_if_release_exists
 
@@ -164,8 +175,9 @@ gh release create "$TAG" --target "$(git rev-parse HEAD)" \
   "$TMP/statuspan-darwin-amd64" \
   "$TMP/statuspan-linux-amd64" \
   "$TMP/statuspan-linux-arm64" \
+  "$TMP/SHA256SUMS" \
   --title "$TAG" \
-  --notes "Binaries for ${TAG}. macOS builds are Developer ID signed and notarized. Install with: curl -fsSL https://statuspan.com/install.sh | sh"
+  --notes "Binaries for ${TAG}. macOS builds are Developer ID signed and notarized. SHA256SUMS lists the binaries. Install with: curl -fsSL https://statuspan.com/install.sh | sh"
 
 git fetch --tags origin
 echo "release ${TAG} published"

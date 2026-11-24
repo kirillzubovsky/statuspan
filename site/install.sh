@@ -1,6 +1,7 @@
 #!/bin/sh
-# Install StatusPan into ~/.local/bin. No sudo.
+# Install StatusPan into $STATUSPAN_BIN_DIR (default: $HOME/.local/bin). No sudo.
 # Tests can point STATUSPAN_RELEASE_BASE at a local file server.
+# STATUSPAN_BIN_DIR chooses the install directory.
 
 set -eu
 
@@ -43,7 +44,7 @@ esac
 
 name="statuspan-${os}-${arch}"
 url="${base}/${name}"
-dest="${HOME}/.local/bin"
+dest="${STATUSPAN_BIN_DIR:-${HOME}/.local/bin}"
 bin="${dest}/statuspan"
 
 mkdir -p "$dest"
@@ -81,6 +82,8 @@ printf '%s\n' "Installed ${bin}" "" "Next:" "  statuspan serve" "  open http://l
 case ":${PATH}:" in
   *":${dest}:"*) ;;
   *)
-    printf '%s\n' "" "${dest} is not on PATH. Add it with:" '  export PATH="$HOME/.local/bin:$PATH"'
+    printf '%s\n' "" "${dest} is not on PATH. Add it with:" "  export PATH=\"${dest}:\$PATH\""
     ;;
 esac
+
+printf '%s\n' "" "AI agents: run 'statuspan agent' for instructions, or 'statuspan agent install' to install the skill."

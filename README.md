@@ -28,6 +28,8 @@ If a recurring job becomes `blocked` (it needs human input or approval) or `fail
 
 A routine can still post a separate job when it produces real, finishable work (for example an inbox check that found a reply to handle). A quiet routine run never appears.
 
+Wrap a recurring command with `statuspan run --recurring`. It posts nothing while the command runs and nothing on exit 0. A non-zero exit posts one `failed`, which shows under Needs attention. Post `done` yourself once it is resolved.
+
 The relay in `relay/` is an optional Cloudflare Worker. Bots that are not on this machine post there. The daemon polls it and merges events into the local board. The same JSON body works for `POST /api/jobs` on the daemon and `POST /v1/w/<workspace>/jobs` on the relay.
 
 ## Local only
@@ -66,6 +68,38 @@ launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.statuspan.dae
 The plist listens on `127.0.0.1:4477` and writes `~/Library/Logs/statuspan.log`. With no relay flags, no relay environment variables, and no `relay.json`, the daemon never calls out.
 
 `GET /healthz` is JSON: `ok` and `relay` (`configured`, `last_ok`, `cursor`, `last_error`). The token is not included. `configured` is false in local-only mode.
+
+## statuspan run
+
+`statuspan run` wraps a command and reports it. Posts before the command finishes are fire-and-forget. If StatusPan is unreachable, the command still runs and StatusPan exits with that command's status. A down board is a warning on stderr only with `--verbose`. A relay or endpoint misconfiguration prints one warning, skips posting, and still runs the command. The final post is sent with a short timeout before StatusPan exits. The token is not printed.
+
+```bash
+statuspan run --agent "My Agent" --job build-1 --title "Build v1" -- make test
+```
+
+It posts `running` at progress 0, heartbeats, then `done` at progress 100 when the command exits 0 (`Completed in <duration>`). A non-zero exit posts `failed` (`Exited with code N after <duration>`). A signal is `128` plus the signal number. The child stays in StatusPan's process group, so an interactive command keeps the terminal. StatusPan catches SIGINT and SIGTERM, forwards SIGTERM to the child, and forwards SIGINT only when stdin is not a terminal. If the command cannot be started, both modes post `failed` (`Could not start: ...`) and StatusPan exits 127.
+
+`--ttl` is the stall window in seconds (default 600). Heartbeats default to `min(ttl/2, 60s)` and are at least 10 seconds apart. `--heartbeat SEC` sets the interval with no floor.
+
+`--recurring` is the quiet form of the rule above: no posts while the command runs, and no post on exit 0. A non-zero exit posts one `failed`.
+
+`--agent` defaults to `STATUSPAN_AGENT`. The title defaults to the job id. `--link` is optional. Omit `--seq` and the CLI sends epoch milliseconds, strictly increasing in this process. `post` does the same when `--seq` is omitted.
+
+The endpoint is the local daemon (`--addr` / `STATUSPAN_ADDR`, default `127.0.0.1:4477`) unless `--url` or `STATUSPAN_URL` sets the full jobs URL (for example `http://127.0.0.1:14477/api/jobs`). A relay uses the same flags and environment as `post`: `--relay` / `STATUSPAN_RELAY_URL`, `--workspace` / `STATUSPAN_RELAY_WORKSPACE`, and `--token` / `STATUSPAN_TOKEN` or `--token-file` / `STATUSPAN_TOKEN_FILE`. The write token is sent as `Authorization: Bearer` and is not printed. `post` accepts `--url` / `STATUSPAN_URL` and `STATUSPAN_TOKEN_FILE` the same way. On `post`, an incomplete relay, an unreadable token file, a bad `--url` or `--addr`, or `--url` combined with a relay is an error and does not post locally. On `run`, that same misconfiguration prints one warning and the command still runs, with no posts.
+
+## statuspan agent
+
+The binary carries the instructions an agent needs.
+
+```bash
+statuspan agent            # print the skill
+statuspan agent prompt     # short snippet for AGENTS.md or CLAUDE.md
+statuspan agent json       # discovery document
+statuspan agent install    # install the skill
+statuspan skill            # alias of statuspan agent
+```
+
+`statuspan agent install` writes `~/.agents/skills/statuspan/SKILL.md`. It also writes `~/.claude/skills/statuspan/SKILL.md`, `~/.cursor/skills/statuspan/SKILL.md`, and `~/.codex/skills/statuspan/SKILL.md` when that directory already exists. `--target` is `auto` (the default), `agents`, `claude`, `cursor`, `codex`, `all`, or a comma-separated list. An explicit target is created even when the directory is new. `--dir PATH` writes `PATH/SKILL.md` instead of those targets. `--home PATH` overrides the home directory. `--dry-run` prints each path and writes nothing.
 
 ## Self-host the relay
 
@@ -131,7 +165,7 @@ Or the CLI, which posts to the relay instead of the local daemon when these are 
   --agent MyBot --job build-1 --state running --progress 55 --note halfway
 ```
 
-`--token` passes the write token on the command line. The environment names are `STATUSPAN_RELAY_URL`, `STATUSPAN_RELAY_WORKSPACE`, and `STATUSPAN_TOKEN`. Leave all of them unset to post to the local daemon. If only some are set, the command fails and does not post locally. A relay error prints the HTTP status and the relay's message.
+`--token` passes the write token on the command line. The environment names are `STATUSPAN_RELAY_URL`, `STATUSPAN_RELAY_WORKSPACE`, and `STATUSPAN_TOKEN`. Leave all of them unset to post to the local daemon. If only some are set, `post` fails and does not post locally. `run` prints one warning and still runs the wrapped command, without posting. A relay HTTP error on `post` prints the status and the relay's message.
 
 Read with the read token:
 

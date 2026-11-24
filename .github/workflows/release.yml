@@ -22,7 +22,7 @@ jobs:
           go-version-file: go.mod
 
       - name: Test
-        run: go test ./...
+        run: go test -race ./...
 
       - name: Skip if release already exists
         id: release_guard
@@ -45,6 +45,11 @@ jobs:
             arch=${spec#*/}
             CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build -ldflags "-s -w -X main.version=${GITHUB_REF_NAME#v}" -o "statuspan-${os}-${arch}" ./cmd/statuspan
           done
+          if command -v shasum >/dev/null 2>&1; then
+            shasum -a 256 statuspan-darwin-arm64 statuspan-darwin-amd64 statuspan-linux-amd64 statuspan-linux-arm64 > SHA256SUMS
+          else
+            sha256sum statuspan-darwin-arm64 statuspan-darwin-amd64 statuspan-linux-amd64 statuspan-linux-arm64 > SHA256SUMS
+          fi
 
       - name: Publish release
         if: steps.release_guard.outputs.skip != 'true'
@@ -57,5 +62,6 @@ jobs:
             statuspan-darwin-amd64 \
             statuspan-linux-amd64 \
             statuspan-linux-arm64 \
+            SHA256SUMS \
             --title "$GITHUB_REF_NAME" \
-            --notes "Binaries for ${GITHUB_REF_NAME}. Install with: curl -fsSL https://statuspan.com/install.sh | sh"
+            --notes "Binaries for ${GITHUB_REF_NAME}. SHA256SUMS lists the binaries. Install with: curl -fsSL https://statuspan.com/install.sh | sh"

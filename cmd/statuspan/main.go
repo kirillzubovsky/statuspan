@@ -10,7 +10,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -28,10 +27,37 @@ import (
 
 // version is reported by `statuspan version`. Release builds override it with
 // -ldflags "-X main.version=<semver>". Untagged local builds keep this default.
-var version = "0.1.0"
+var version = "0.2.0"
+
+// exitError carries a process exit code. A nil err means stay quiet.
+// Other errors still exit 1.
+type exitError struct {
+	code int
+	err  error
+}
+
+func (e *exitError) Error() string {
+	if e.err != nil {
+		return e.err.Error()
+	}
+	return fmt.Sprintf("exit status %d", e.code)
+}
+
+func (e *exitError) Unwrap() error { return e.err }
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
+		var ee *exitError
+		if errors.As(err, &ee) {
+			if ee.err != nil && !errors.Is(ee.err, flag.ErrHelp) {
+				fmt.Fprintf(os.Stderr, "statuspan: %s\n", ee.err)
+			}
+			code := ee.code
+			if code <= 0 {
+				code = 1
+			}
+			os.Exit(code)
+		}
 		if !errors.Is(err, flag.ErrHelp) {
 			fmt.Fprintf(os.Stderr, "statuspan: %s\n", err)
 		}
@@ -40,10 +66,14 @@ func main() {
 }
 
 func run(args []string) error {
-	// Version flags must be handled before the serve shortcut. Any other
-	// leading dash is a serve flag, which would swallow --version.
+	// Version and help flags must be handled before the serve shortcut. Any
+	// other leading dash is a serve flag, which would swallow --version.
 	if len(args) > 0 && isVersionArg(args[0]) {
 		fmt.Println("statuspan", version)
+		return nil
+	}
+	if len(args) > 0 && isHelpArg(args[0]) {
+		writeUsage(os.Stdout)
 		return nil
 	}
 	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
@@ -54,13 +84,14 @@ func run(args []string) error {
 		return serveCmd(args[1:])
 	case "post":
 		return postCmd(args[1:])
+	case "run":
+		return runCmd(args[1:])
+	case "agent", "skill":
+		return agentCmd(args[1:])
 	case "ls":
 		return lsCmd(args[1:])
 	case "clear":
 		return clearCmd(args[1:])
-	case "help", "-h", "--help":
-		usage()
-		return nil
 	default:
 		return fmt.Errorf("unknown command %q (try statuspan help)", args[0])
 	}
@@ -70,21 +101,36 @@ func isVersionArg(arg string) bool {
 	return arg == "version" || arg == "-version" || arg == "--version"
 }
 
+func isHelpArg(arg string) bool {
+	return arg == "help" || arg == "-h" || arg == "--help" || arg == "-help"
+}
+
 func usage() {
-	fmt.Fprintf(os.Stderr, `statuspan %s — local agent status board
+	writeUsage(os.Stderr)
+}
+
+func writeUsage(w io.Writer) {
+	fmt.Fprintf(w, `statuspan %s — local agent status board
 
 Usage:
   statuspan [serve] [--addr host:port] [--data dir]
             [--abandon-after DUR] [--abandon-waiting-after DUR]
             [--relay-url URL] [--relay-workspace NAME] [--relay-token-file PATH]
   statuspan post --agent A --job ID [--state STATE] [--title T] [--progress N] [--link URL] [--note N] [--seq N] [--ttl S]
-            [--addr host:port | --relay URL --workspace NAME (--token TOKEN | --token-file PATH)]
+            [--url ENDPOINT | --addr host:port | --relay URL --workspace NAME (--token TOKEN | --token-file PATH)]
+  statuspan run --agent NAME --job ID [--title T] [--ttl SEC] [--heartbeat SEC] [--link URL] [--recurring]
+            [--url ENDPOINT | --addr host:port | --relay URL --workspace NAME (--token TOKEN | --token-file PATH)]
+            [--verbose] -- COMMAND [ARGS...]
+  statuspan agent [print|prompt|json|install] [--target LIST] [--dir PATH] [--home PATH] [--dry-run]
   statuspan ls [--addr host:port]
   statuspan clear --yes [--addr host:port]
   statuspan version
 
+AI agents: run 'statuspan agent' for instructions or 'statuspan agent install' to install the skill.
+
 Relay sync is optional. With no relay flags, environment, or data-dir relay.json, the daemon stays local.
-post talks to the local daemon unless --relay / --workspace / --token (or STATUSPAN_RELAY_URL, STATUSPAN_RELAY_WORKSPACE, STATUSPAN_TOKEN) are set.
+post and run talk to the local daemon unless --relay / --workspace / --token (or STATUSPAN_RELAY_URL, STATUSPAN_RELAY_WORKSPACE, STATUSPAN_TOKEN, STATUSPAN_TOKEN_FILE) are set.
+STATUSPAN_URL, or --url, is the full local jobs endpoint. STATUSPAN_AGENT is the default for --agent on run.
 
 `, version)
 }
@@ -195,6 +241,7 @@ func postCmd(args []string) error {
 	title := fs.String("title", "", "title")
 	link := fs.String("link", "", "link URL")
 	note := fs.String("note", "", "note")
+	jobURL := fs.String("url", "", "full jobs endpoint (overrides --addr; env STATUSPAN_URL)")
 	addr := fs.String("addr", envOr("STATUSPAN_ADDR", server.DefaultAddr), "server address")
 	relayURL := fs.String("relay", "", "post to this relay instead of the local daemon")
 	workspace := fs.String("workspace", "", "relay workspace")
@@ -238,6 +285,9 @@ func postCmd(args []string) error {
 	}
 	if seq.set {
 		u.Seq = &seq.n
+	} else {
+		n := nextSeq()
+		u.Seq = &n
 	}
 	if err := store.Validate(u); err != nil {
 		return err
@@ -246,16 +296,26 @@ func postCmd(args []string) error {
 	if err != nil {
 		return err
 	}
+	if remote && seen["url"] {
+		return fmt.Errorf("--url cannot be combined with a relay post")
+	}
 	data, err := json.Marshal(u)
 	if err != nil {
 		return err
 	}
 	if remote {
+		if err := validateJobsEndpoint(rURL); err != nil {
+			return fmt.Errorf("--relay: %w", err)
+		}
 		return postRelay(rURL, rWS, rTok, data)
+	}
+	jobsURL, err := localJobsURL(seen, *jobURL, *addr)
+	if err != nil {
+		return err
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint(*addr, "/api/jobs"), bytes.NewReader(data))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, jobsURL, bytes.NewReader(data))
 	if err != nil {
 		return err
 	}
@@ -300,6 +360,15 @@ func relayTarget(seen map[string]bool, flagURL, flagWS, flagToken, flagFile stri
 		}
 	default:
 		tok = strings.TrimSpace(os.Getenv("STATUSPAN_TOKEN"))
+		if tok == "" {
+			if path := strings.TrimSpace(os.Getenv("STATUSPAN_TOKEN_FILE")); path != "" {
+				var err error
+				tok, err = relay.ReadTokenFile(path)
+				if err != nil {
+					return false, "", "", "", fmt.Errorf("token file: %w", err)
+				}
+			}
+		}
 	}
 	if urlVal == "" && ws == "" && tok == "" {
 		return false, "", "", "", nil
@@ -312,7 +381,7 @@ func relayTarget(seen map[string]bool, flagURL, flagWS, flagToken, flagFile stri
 		missing = append(missing, "--workspace or STATUSPAN_RELAY_WORKSPACE")
 	}
 	if tok == "" {
-		missing = append(missing, "--token, --token-file, or STATUSPAN_TOKEN")
+		missing = append(missing, "--token, --token-file, STATUSPAN_TOKEN, or STATUSPAN_TOKEN_FILE")
 	}
 	if len(missing) > 0 {
 		return false, "", "", "", fmt.Errorf("relay post is missing %s", strings.Join(missing, ", "))
@@ -321,11 +390,10 @@ func relayTarget(seen map[string]bool, flagURL, flagWS, flagToken, flagFile stri
 }
 
 func postRelay(base, workspace, token string, data []byte) error {
-	path := "/v1/w/" + url.PathEscape(workspace) + "/jobs"
-	endpoint := strings.TrimRight(base, "/") + path
+	jobsURL := relayJobsEndpoint(base, workspace)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(data))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, jobsURL, bytes.NewReader(data))
 	if err != nil {
 		return err
 	}
@@ -482,6 +550,24 @@ func parseNonNegativeDuration(name, raw string) (time.Duration, error) {
 	}
 	return d, nil
 }
+
+// nextSeq is epoch milliseconds, strictly increasing in this process.
+// The store ignores a seq that is not greater than the one already stored.
+func nextSeq() int64 {
+	seqMu.Lock()
+	defer seqMu.Unlock()
+	n := time.Now().UnixMilli()
+	if n <= seqLast {
+		n = seqLast + 1
+	}
+	seqLast = n
+	return n
+}
+
+var (
+	seqMu   sync.Mutex
+	seqLast int64
+)
 
 func envOr(key, fallback string) string {
 	if v := strings.TrimSpace(os.Getenv(key)); v != "" {

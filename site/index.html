@@ -39,7 +39,7 @@
       "name": "StatusPan",
       "applicationCategory": "DeveloperApplication",
       "operatingSystem": "macOS, Linux",
-      "softwareVersion": "0.1.1",
+      "softwareVersion": "0.2.0",
       "license": "https://opensource.org/licenses/MIT",
       "downloadUrl": "https://statuspan.com/install.sh",
       "codeRepository": "https://github.com/kirillzubovsky/statuspan",
@@ -271,6 +271,16 @@ code{font:inherit}
       <p><a href="http://localhost:4477">http://localhost:4477</a></p>
      </div>
     </li>
+    <li>
+     <span class="n">04</span>
+     <div>
+      <b>Tell your agent</b>
+      <pre><code>statuspan agent
+statuspan agent install
+statuspan run --agent "My Agent" --job build-1 -- make test</code></pre>
+      <p><span class="mono">statuspan agent</span> prints the skill. <span class="mono">statuspan agent install</span> writes it where agents look. <span class="mono">statuspan run</span> wraps a command, posts running then done or failed, and keeps that command's exit code.</p>
+     </div>
+    </li>
    </ol>
   </section>
 
@@ -322,7 +332,10 @@ code{font:inherit}
   <section class="panel" aria-labelledby="agents">
    <h2 class="sh" id="agents">For AI agents</h2>
    <div class="note">
-    <p>One fetch is enough to start posting. Healthy recurring jobs stay off the board. If a recurring job becomes blocked or failed, post it so it shows under Needs attention. Once it is fixed or unblocked, post <span class="mono">done</span> so it clears out.</p>
+    <p>The binary carries the skill. <span class="mono">statuspan agent</span> prints it. <span class="mono">statuspan agent install</span> writes it into the agent directories. <span class="mono">statuspan run</span> wraps a command and posts the outcome. Healthy recurring jobs stay off the board. If a recurring job becomes blocked or failed, post it so it shows under Needs attention. Once it is fixed or unblocked, post <span class="mono">done</span> so it clears out.</p>
+    <pre><code>statuspan agent
+statuspan agent install
+statuspan run --agent "My Agent" --job build-1 -- make test</code></pre>
     <pre><code>curl -fsSL https://statuspan.com/llms.txt</code></pre>
    </div>
    <ul class="dl">

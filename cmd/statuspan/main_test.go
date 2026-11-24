@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -16,13 +17,41 @@ import (
 )
 
 func TestMain(m *testing.M) {
+	if mode := os.Getenv("STATUSPAN_TEST_HELPER"); mode != "" {
+		statuspanHelper(mode)
+	}
+	os.Unsetenv("STATUSPAN_TEST_HELPER")
 	os.Unsetenv("STATUSPAN_RELAY_URL")
 	os.Unsetenv("STATUSPAN_RELAY_WORKSPACE")
 	os.Unsetenv("STATUSPAN_RELAY_READ_TOKEN")
 	os.Unsetenv("STATUSPAN_TOKEN")
+	os.Unsetenv("STATUSPAN_TOKEN_FILE")
+	os.Unsetenv("STATUSPAN_URL")
+	os.Unsetenv("STATUSPAN_AGENT")
 	os.Unsetenv("STATUSPAN_ABANDON_AFTER")
 	os.Unsetenv("STATUSPAN_ABANDON_WAITING_AFTER")
 	os.Exit(m.Run())
+}
+
+func statuspanHelper(mode string) {
+	kind, rest, _ := strings.Cut(mode, ":")
+	switch kind {
+	case "exit":
+		code, err := strconv.Atoi(rest)
+		if err != nil {
+			os.Exit(2)
+		}
+		os.Exit(code)
+	case "sleep":
+		d, err := time.ParseDuration(rest)
+		if err != nil {
+			os.Exit(2)
+		}
+		time.Sleep(d)
+		os.Exit(0)
+	default:
+		os.Exit(2)
+	}
 }
 
 func TestVersionOutput(t *testing.T) {
@@ -59,6 +88,63 @@ func captureStdout(t *testing.T, fn func() error) (string, error) {
 		t.Fatal(err)
 	}
 	return buf.String(), runErr
+}
+
+func TestHelpMentionsAgentAndRun(t *testing.T) {
+	tip := "AI agents: run 'statuspan agent' for instructions or 'statuspan agent install' to install the skill."
+	for _, arg := range []string{"--help", "-h", "help"} {
+		t.Run(arg, func(t *testing.T) {
+			got, err := captureStdout(t, func() error { return run([]string{arg}) })
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(got, "agent") || !strings.Contains(got, "run") || !strings.Contains(got, tip) {
+				t.Fatalf("help output:\n%s", got)
+			}
+		})
+	}
+}
+
+func TestPostAutoSeqAndURL(t *testing.T) {
+	var muHits []map[string]any
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/jobs" {
+			t.Errorf("path %s", r.URL.Path)
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("body: %v", err)
+		}
+		muHits = append(muHits, body)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true,"applied":true}`))
+	}))
+	defer ts.Close()
+
+	t.Setenv("STATUSPAN_URL", ts.URL+"/api/jobs")
+	if err := postCmd([]string{"--agent", "My Agent", "--job", "build-1", "--state", "running"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := postCmd([]string{"--url", ts.URL + "/api/jobs", "--agent", "My Agent", "--job", "build-1", "--progress", "40"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := postCmd([]string{"--url", ts.URL + "/api/jobs", "--agent", "My Agent", "--job", "build-1", "--seq", "7", "--note", "pinned"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(muHits) != 3 {
+		t.Fatalf("hits %d", len(muHits))
+	}
+	first, ok := muHits[0]["seq"].(float64)
+	if !ok || first <= 0 {
+		t.Fatalf("first seq %v", muHits[0]["seq"])
+	}
+	second, ok := muHits[1]["seq"].(float64)
+	if !ok || second <= first {
+		t.Fatalf("second seq %v first %v", muHits[1]["seq"], first)
+	}
+	if muHits[2]["seq"] != float64(7) {
+		t.Fatalf("explicit seq %v", muHits[2]["seq"])
+	}
 }
 
 func TestPostAllowsOmittedState(t *testing.T) {
@@ -168,6 +254,33 @@ func TestPostRelaySendsBearerAndPath(t *testing.T) {
 	}
 	if hits[0].body["state"] != "running" || hits[0].body["title"] != "Build v1" {
 		t.Fatalf("first body %v", hits[0].body)
+	}
+}
+
+func TestPostPartialRelayAndBadEndpointError(t *testing.T) {
+	t.Setenv("STATUSPAN_RELAY_URL", "https://relay.example.com")
+	err := postCmd([]string{"--agent", "t", "--job", "j", "--state", "running"})
+	if err == nil || !strings.Contains(err.Error(), "missing") {
+		t.Fatalf("%v", err)
+	}
+
+	t.Setenv("STATUSPAN_RELAY_WORKSPACE", "home")
+	t.Setenv("STATUSPAN_TOKEN_FILE", filepath.Join(t.TempDir(), "missing-token"))
+	err = postCmd([]string{"--agent", "t", "--job", "j", "--state", "running"})
+	if err == nil || !strings.Contains(err.Error(), "token file") {
+		t.Fatalf("%v", err)
+	}
+
+	t.Setenv("STATUSPAN_RELAY_URL", "")
+	t.Setenv("STATUSPAN_RELAY_WORKSPACE", "")
+	t.Setenv("STATUSPAN_TOKEN_FILE", "")
+	err = postCmd([]string{"--url", "not-a-url", "--agent", "t", "--job", "j", "--state", "running"})
+	if err == nil || !strings.Contains(err.Error(), "--url") {
+		t.Fatalf("%v", err)
+	}
+	err = postCmd([]string{"--addr", "not-a-port", "--agent", "t", "--job", "j", "--state", "running"})
+	if err == nil || !strings.Contains(err.Error(), "--addr") {
+		t.Fatalf("%v", err)
 	}
 }
 
