@@ -1,0 +1,793 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "StatusPan",
+    "version": "0.1.1",
+    "summary": "Local agent status board and the optional self-hosted relay.",
+    "description": "Two servers share one job-update body. The local daemon at http://127.0.0.1:4477 has no auth and no CORS. The self-hosted relay uses Bearer tokens: spw_ write tokens post for one agent and cannot read, spr_ read tokens cannot write, and the Worker ADMIN_TOKEN manages workspaces. stalled and abandoned are derived at read time and cannot be posted. This host is a generic example. A real relay looks like https://statuspan-relay.<your-account>.workers.dev.",
+    "license": {
+      "name": "MIT",
+      "url": "https://opensource.org/licenses/MIT"
+    },
+    "externalDocs": {
+      "description": "Full agent reference",
+      "url": "https://statuspan.com/llms-full.txt"
+    }
+  },
+  "servers": [
+    {
+      "url": "http://127.0.0.1:4477",
+      "description": "Local daemon. No authentication. Loopback only."
+    },
+    {
+      "url": "https://relay.example.com",
+      "description": "Self-hosted relay. Example host only."
+    }
+  ],
+  "tags": [
+    {"name": "daemon", "description": "Local daemon. No auth."},
+    {"name": "relay", "description": "Self-hosted relay. Bearer spr_ or spw_."},
+    {"name": "admin", "description": "Relay admin. Bearer ADMIN_TOKEN. Bots do not call these."}
+  ],
+  "paths": {
+    "/healthz": {
+      "get": {
+        "operationId": "healthz",
+        "summary": "Health",
+        "description": "The daemon returns JSON. The relay returns plain text ok and answers other methods with 405 JSON method not allowed.",
+        "responses": {
+          "200": {
+            "description": "Daemon JSON, or relay text ok.",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/DaemonHealth"},
+                "example": {
+                  "ok": true,
+                  "relay": {"configured": false, "last_ok": null, "cursor": 0, "last_error": ""}
+                }
+              },
+              "text/plain": {
+                "schema": {"type": "string", "const": "ok\n"},
+                "example": "ok\n"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/": {
+      "get": {
+        "tags": ["daemon"],
+        "operationId": "daemonIndex",
+        "summary": "Embedded board",
+        "servers": [{"url": "http://127.0.0.1:4477"}],
+        "responses": {
+          "200": {
+            "description": "HTML board. Cache-Control is no-store.",
+            "content": {"text/html": {"schema": {"type": "string"}}}
+          }
+        }
+      }
+    },
+    "/favicon.ico": {
+      "get": {
+        "tags": ["daemon"],
+        "operationId": "daemonFavicon",
+        "summary": "Empty favicon",
+        "servers": [{"url": "http://127.0.0.1:4477"}],
+        "responses": {"204": {"description": "No content."}}
+      }
+    },
+    "/api/jobs": {
+      "post": {
+        "tags": ["daemon"],
+        "operationId": "daemonPostJobs",
+        "summary": "Post job updates",
+        "servers": [{"url": "http://127.0.0.1:4477"}],
+        "description": "One JobUpdate or an array. Validated before any write. Body limit 1 MiB. No auth.",
+        "requestBody": {"$ref": "#/components/requestBodies/JobUpdates"},
+        "responses": {
+          "200": {"$ref": "#/components/responses/Applied"},
+          "400": {"$ref": "#/components/responses/Error"},
+          "500": {"$ref": "#/components/responses/Error"}
+        }
+      },
+      "get": {
+        "tags": ["daemon"],
+        "operationId": "daemonListJobs",
+        "summary": "List jobs",
+        "servers": [{"url": "http://127.0.0.1:4477"}],
+        "responses": {
+          "200": {
+            "description": "Board snapshot with abandon windows in seconds. 0 means that category is off.",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/DaemonJobList"}
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": ["daemon"],
+        "operationId": "daemonClearJobs",
+        "summary": "Delete every job",
+        "servers": [{"url": "http://127.0.0.1:4477"}],
+        "description": "Requires confirm=all. If the confirm query is present, the body is ignored. Any other confirmation is 400 and changes nothing. The log is copied to jobs-backup-<unix>.jsonl first.",
+        "parameters": [
+          {
+            "name": "confirm",
+            "in": "query",
+            "required": false,
+            "schema": {"type": "string", "const": "all"},
+            "description": "Must be all. When this query key is present, the body is not read."
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["confirm"],
+                "properties": {"confirm": {"type": "string", "const": "all"}}
+              },
+              "example": {"confirm": "all"}
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Board cleared.",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/ClearResult"}
+              }
+            }
+          },
+          "400": {
+            "description": "confirm must be \"all\", or invalid json.",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}
+          },
+          "500": {"$ref": "#/components/responses/Error"}
+        }
+      }
+    },
+    "/api/jobs/{agent}/{job_id}": {
+      "get": {
+        "tags": ["daemon"],
+        "operationId": "daemonGetJob",
+        "summary": "Get one job",
+        "servers": [{"url": "http://127.0.0.1:4477"}],
+        "parameters": [
+          {"$ref": "#/components/parameters/agent"},
+          {"$ref": "#/components/parameters/jobId"}
+        ],
+        "responses": {
+          "200": {
+            "description": "The job.",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Job"}}}
+          },
+          "404": {"$ref": "#/components/responses/Error"}
+        }
+      },
+      "delete": {
+        "tags": ["daemon"],
+        "operationId": "daemonDeleteJob",
+        "summary": "Delete one job",
+        "servers": [{"url": "http://127.0.0.1:4477"}],
+        "parameters": [
+          {"$ref": "#/components/parameters/agent"},
+          {"$ref": "#/components/parameters/jobId"}
+        ],
+        "responses": {
+          "200": {
+            "description": "deleted is false when the job was already absent. That is still 200.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["ok", "deleted"],
+                  "properties": {
+                    "ok": {"type": "boolean", "const": true},
+                    "deleted": {"type": "boolean"}
+                  }
+                }
+              }
+            }
+          },
+          "400": {"$ref": "#/components/responses/Error"},
+          "500": {"$ref": "#/components/responses/Error"}
+        }
+      }
+    },
+    "/api/events": {
+      "get": {
+        "tags": ["daemon"],
+        "operationId": "daemonEvents",
+        "summary": "Recent events",
+        "servers": [{"url": "http://127.0.0.1:4477"}],
+        "description": "Newest first. Without agent, limit defaults to 200 and is capped at 200. limit 0 returns an empty list. With agent, the feed is that agent's events and is capped only when limit is set.",
+        "parameters": [
+          {"$ref": "#/components/parameters/limit"},
+          {
+            "name": "agent",
+            "in": "query",
+            "required": false,
+            "schema": {"type": "string"}
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Event feed.",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/DaemonEventList"}}}
+          },
+          "400": {
+            "description": "invalid limit",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}
+          }
+        }
+      }
+    },
+    "/api/stream": {
+      "get": {
+        "tags": ["daemon"],
+        "operationId": "daemonStream",
+        "summary": "Board SSE",
+        "servers": [{"url": "http://127.0.0.1:4477"}],
+        "description": "event: snapshot on connect (DaemonSnapshot), then event: job for each applied change. A comment line `: keepalive` every 15 seconds. An ignored seq does not emit a job event. A delete emits a job with deleted true.",
+        "responses": {
+          "200": {
+            "description": "text/event-stream",
+            "content": {
+              "text/event-stream": {
+                "schema": {"type": "string"}
+              }
+            }
+          },
+          "500": {
+            "description": "Plain text streaming unsupported, when the writer cannot flush.",
+            "content": {"text/plain": {"schema": {"type": "string"}}}
+          }
+        }
+      }
+    },
+    "/v1/w/{workspace}/jobs": {
+      "post": {
+        "tags": ["relay"],
+        "operationId": "relayPostJobs",
+        "summary": "Post job updates",
+        "servers": [{"url": "https://relay.example.com"}],
+        "security": [{"writeToken": []}],
+        "description": "Same body as the daemon. Write token only, and every item's agent must match the token. Batch cap 1000. Body limit 1 MiB.",
+        "parameters": [{"$ref": "#/components/parameters/workspace"}],
+        "requestBody": {"$ref": "#/components/requestBodies/JobUpdates"},
+        "responses": {
+          "200": {"$ref": "#/components/responses/Applied"},
+          "400": {"$ref": "#/components/responses/Error"},
+          "401": {"$ref": "#/components/responses/Error"},
+          "403": {"$ref": "#/components/responses/Error"},
+          "404": {"$ref": "#/components/responses/Error"},
+          "405": {"$ref": "#/components/responses/MethodNotAllowed"}
+        }
+      },
+      "get": {
+        "tags": ["relay"],
+        "operationId": "relayListJobs",
+        "summary": "List jobs",
+        "servers": [{"url": "https://relay.example.com"}],
+        "security": [{"readToken": []}],
+        "description": "Read token only. Abandoned uses the fixed 24h and 7 day windows. No abandon_after_seconds field.",
+        "parameters": [{"$ref": "#/components/parameters/workspace"}],
+        "responses": {
+          "200": {
+            "description": "Jobs, same sort as the daemon.",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/RelayJobList"}}}
+          },
+          "401": {"$ref": "#/components/responses/Error"},
+          "403": {"$ref": "#/components/responses/Error"},
+          "404": {"$ref": "#/components/responses/Error"},
+          "405": {"$ref": "#/components/responses/MethodNotAllowed"}
+        }
+      }
+    },
+    "/v1/w/{workspace}/events": {
+      "get": {
+        "tags": ["relay"],
+        "operationId": "relayEvents",
+        "summary": "Poll events",
+        "servers": [{"url": "https://relay.example.com"}],
+        "security": [{"readToken": []}],
+        "description": "Ascending cursor, exclusive of since. Default limit 200, cap 1000. limit 0 returns no events. next_cursor is the last event cursor, or since when the page is empty.",
+        "parameters": [
+          {"$ref": "#/components/parameters/workspace"},
+          {
+            "name": "since",
+            "in": "query",
+            "required": false,
+            "schema": {"type": "string", "pattern": "^\\d+$"},
+            "description": "Exclusive cursor. Default 0. Non-digits are 400 invalid since."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {"type": "string", "pattern": "^\\d+$"},
+            "description": "Default 200. Values above 1000 are capped. Non-digits are 400 invalid limit."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "One page of events.",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/RelayEventList"}}}
+          },
+          "400": {"$ref": "#/components/responses/Error"},
+          "401": {"$ref": "#/components/responses/Error"},
+          "403": {"$ref": "#/components/responses/Error"},
+          "404": {"$ref": "#/components/responses/Error"},
+          "405": {"$ref": "#/components/responses/MethodNotAllowed"}
+        }
+      }
+    },
+    "/v1/w/{workspace}/stream": {
+      "get": {
+        "tags": ["relay"],
+        "operationId": "relayStream",
+        "summary": "Relay SSE",
+        "servers": [{"url": "https://relay.example.com"}],
+        "security": [{"readToken": []}],
+        "description": "event: snapshot on connect (now, jobs, 200 newest events). Then event: job. Keepalive comment every 15 seconds. No abandon-window fields.",
+        "parameters": [{"$ref": "#/components/parameters/workspace"}],
+        "responses": {
+          "200": {
+            "description": "text/event-stream",
+            "content": {"text/event-stream": {"schema": {"type": "string"}}}
+          },
+          "401": {"$ref": "#/components/responses/Error"},
+          "403": {"$ref": "#/components/responses/Error"},
+          "404": {"$ref": "#/components/responses/Error"},
+          "405": {"$ref": "#/components/responses/MethodNotAllowed"}
+        }
+      }
+    },
+    "/v1/admin/workspaces/{workspace}": {
+      "post": {
+        "tags": ["admin"],
+        "operationId": "adminCreateWorkspace",
+        "summary": "Create a workspace",
+        "servers": [{"url": "https://relay.example.com"}],
+        "security": [{"adminToken": []}],
+        "parameters": [{"$ref": "#/components/parameters/workspace"}],
+        "responses": {
+          "200": {
+            "description": "created is false when the workspace already existed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["ok", "created"],
+                  "properties": {
+                    "ok": {"type": "boolean", "const": true},
+                    "created": {"type": "boolean"}
+                  }
+                }
+              }
+            }
+          },
+          "400": {"$ref": "#/components/responses/Error"},
+          "401": {"$ref": "#/components/responses/Error"},
+          "405": {"$ref": "#/components/responses/MethodNotAllowed"}
+        }
+      }
+    },
+    "/v1/admin/workspaces/{workspace}/tokens": {
+      "get": {
+        "tags": ["admin"],
+        "operationId": "adminListTokens",
+        "summary": "List tokens",
+        "servers": [{"url": "https://relay.example.com"}],
+        "security": [{"adminToken": []}],
+        "description": "Ids and labels only. Secrets and hashes are not returned.",
+        "parameters": [{"$ref": "#/components/parameters/workspace"}],
+        "responses": {
+          "200": {
+            "description": "Token metadata.",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/TokenList"}}}
+          },
+          "401": {"$ref": "#/components/responses/Error"},
+          "404": {"$ref": "#/components/responses/Error"},
+          "405": {"$ref": "#/components/responses/MethodNotAllowed"}
+        }
+      },
+      "post": {
+        "tags": ["admin"],
+        "operationId": "adminMintToken",
+        "summary": "Mint a token",
+        "servers": [{"url": "https://relay.example.com"}],
+        "security": [{"adminToken": []}],
+        "description": "kind write requires agent. kind read must not set agent. label is optional, at most 200 characters. The token is returned once.",
+        "parameters": [{"$ref": "#/components/parameters/workspace"}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {"$ref": "#/components/schemas/MintRequest"},
+              "examples": {
+                "write": {"value": {"kind": "write", "agent": "MyBot", "label": "laptop"}},
+                "read": {"value": {"kind": "read", "label": "board"}}
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Minted token. token is shown only here.",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/MintResult"}}}
+          },
+          "400": {"$ref": "#/components/responses/Error"},
+          "401": {"$ref": "#/components/responses/Error"},
+          "404": {"$ref": "#/components/responses/Error"},
+          "405": {"$ref": "#/components/responses/MethodNotAllowed"}
+        }
+      }
+    },
+    "/v1/admin/workspaces/{workspace}/tokens/{token_id}": {
+      "delete": {
+        "tags": ["admin"],
+        "operationId": "adminRevokeToken",
+        "summary": "Revoke a token",
+        "servers": [{"url": "https://relay.example.com"}],
+        "security": [{"adminToken": []}],
+        "parameters": [
+          {"$ref": "#/components/parameters/workspace"},
+          {"$ref": "#/components/parameters/tokenId"}
+        ],
+        "responses": {
+          "200": {
+            "description": "Revoked.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["ok", "revoked"],
+                  "properties": {
+                    "ok": {"type": "boolean", "const": true},
+                    "revoked": {"type": "boolean", "const": true}
+                  }
+                }
+              }
+            }
+          },
+          "400": {"$ref": "#/components/responses/Error"},
+          "401": {"$ref": "#/components/responses/Error"},
+          "404": {"$ref": "#/components/responses/Error"},
+          "405": {"$ref": "#/components/responses/MethodNotAllowed"}
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "writeToken": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "spw_",
+        "description": "Relay write token. Prefix spw_. Scoped to one agent. Cannot read."
+      },
+      "readToken": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "spr_",
+        "description": "Relay read token. Prefix spr_. Can list jobs, poll events, and open the stream. Cannot post."
+      },
+      "adminToken": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Worker ADMIN_TOKEN secret. Not an spr_ or spw_ token."
+      }
+    },
+    "parameters": {
+      "workspace": {
+        "name": "workspace",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+        }
+      },
+      "agent": {
+        "name": "agent",
+        "in": "path",
+        "required": true,
+        "schema": {"type": "string", "minLength": 1}
+      },
+      "jobId": {
+        "name": "job_id",
+        "in": "path",
+        "required": true,
+        "schema": {"type": "string", "minLength": 1}
+      },
+      "tokenId": {
+        "name": "token_id",
+        "in": "path",
+        "required": true,
+        "schema": {"type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$"},
+        "description": "A bad id is 400 invalid workspace, the same message as a bad workspace name."
+      },
+      "limit": {
+        "name": "limit",
+        "in": "query",
+        "required": false,
+        "schema": {"type": "integer", "minimum": 0},
+        "description": "Daemon event limit. Default 200. Negative or non-integer is 400 invalid limit."
+      }
+    },
+    "requestBodies": {
+      "JobUpdates": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "oneOf": [
+                {"$ref": "#/components/schemas/JobUpdate"},
+                {
+                  "type": "array",
+                  "items": {"$ref": "#/components/schemas/JobUpdate"},
+                  "description": "The relay rejects more than 1000 items. The daemon's only cap is 1 MiB."
+                }
+              ]
+            },
+            "examples": {
+              "one": {
+                "value": {
+                  "agent": "MyBot",
+                  "job_id": "build-1",
+                  "title": "Build v1",
+                  "state": "running",
+                  "progress": 40,
+                  "link": "https://example.com",
+                  "seq": 1,
+                  "ttl": 600
+                }
+              },
+              "partial": {
+                "value": {"agent": "MyBot", "job_id": "build-1", "progress": 80, "note": "almost there"}
+              }
+            }
+          }
+        }
+      }
+    },
+    "responses": {
+      "Applied": {
+        "description": "Accepted. applied is false when every item was an equal or older seq.",
+        "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Applied"}}}
+      },
+      "Error": {
+        "description": "Error object. Status depends on the operation.",
+        "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}
+      },
+      "MethodNotAllowed": {
+        "description": "method not allowed. The Allow header lists the methods.",
+        "headers": {
+          "Allow": {"schema": {"type": "string"}}
+        },
+        "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}
+      }
+    },
+    "schemas": {
+      "JobUpdate": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["agent", "job_id"],
+        "description": "Partial update. Omit a field to leave it. Canonical schema: https://statuspan.com/schema/job-update.schema.json",
+        "properties": {
+          "agent": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^(?=.*\\S)[^/\\\\\\u0000]+$"
+          },
+          "job_id": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^(?=.*\\S)[^/\\\\\\u0000]+$"
+          },
+          "title": {"type": ["string", "null"]},
+          "state": {
+            "type": "string",
+            "enum": ["", "queued", "running", "blocked", "done", "failed"],
+            "description": "Required on a new job. Empty leaves an existing job's state. stalled and abandoned are rejected."
+          },
+          "progress": {"type": ["integer", "null"], "minimum": 0, "maximum": 100},
+          "link": {"type": ["string", "null"]},
+          "note": {"type": ["string", "null"]},
+          "seq": {
+            "type": ["integer", "null"],
+            "description": "Strictly greater than the stored seq, or omit. Equal or lower is history only. The relay accepts safe integers. The daemon accepts int64."
+          },
+          "ttl": {
+            "type": ["integer", "null"],
+            "minimum": 0,
+            "description": "Seconds. Default 600 when omitted on create. 0 stalls a running job immediately."
+          }
+        }
+      },
+      "Event": {
+        "type": "object",
+        "required": ["agent", "job_id", "ts", "applied"],
+        "properties": {
+          "n": {"type": "integer", "description": "Log id. Not seq."},
+          "cursor": {"type": "integer", "description": "Relay only. Same value as n."},
+          "agent": {"type": "string"},
+          "job_id": {"type": "string"},
+          "state": {"type": "string"},
+          "progress": {"type": "integer"},
+          "note": {"type": "string"},
+          "title": {"type": "string"},
+          "link": {"type": "string"},
+          "ts": {"type": "string", "format": "date-time"},
+          "applied": {"type": "boolean"},
+          "seq": {"type": "integer"},
+          "kind": {"type": "string", "enum": ["update", "delete"]}
+        }
+      },
+      "Job": {
+        "type": "object",
+        "required": ["agent", "job_id", "title", "state", "progress", "ttl", "started_at", "updated_at", "elapsed_seconds", "stalled", "abandoned", "history"],
+        "properties": {
+          "agent": {"type": "string"},
+          "job_id": {"type": "string"},
+          "title": {"type": "string"},
+          "state": {"type": "string", "enum": ["queued", "running", "blocked", "done", "failed"]},
+          "progress": {"type": "integer", "minimum": 0, "maximum": 100},
+          "link": {"type": "string"},
+          "seq": {"type": "integer"},
+          "ttl": {"type": "integer", "minimum": 0},
+          "note": {"type": "string"},
+          "started_at": {"type": "string", "format": "date-time"},
+          "updated_at": {"type": "string", "format": "date-time"},
+          "finished_at": {"type": "string", "format": "date-time"},
+          "elapsed_seconds": {"type": "integer", "minimum": 0},
+          "stalled": {"type": "boolean"},
+          "abandoned": {"type": "boolean"},
+          "abandoned_at": {"type": "string", "format": "date-time"},
+          "history": {"type": "array", "items": {"$ref": "#/components/schemas/Event"}},
+          "deleted": {"type": "boolean", "description": "True only on a daemon SSE delete tombstone."}
+        }
+      },
+      "DaemonJobList": {
+        "type": "object",
+        "required": ["now", "jobs", "abandon_after_seconds", "abandon_waiting_after_seconds"],
+        "properties": {
+          "now": {"type": "string", "format": "date-time"},
+          "jobs": {"type": "array", "items": {"$ref": "#/components/schemas/Job"}},
+          "abandon_after_seconds": {"type": "integer", "minimum": 0},
+          "abandon_waiting_after_seconds": {"type": "integer", "minimum": 0}
+        }
+      },
+      "RelayJobList": {
+        "type": "object",
+        "required": ["now", "jobs"],
+        "properties": {
+          "now": {"type": "string", "format": "date-time"},
+          "jobs": {"type": "array", "items": {"$ref": "#/components/schemas/Job"}}
+        }
+      },
+      "DaemonEventList": {
+        "type": "object",
+        "required": ["now", "events"],
+        "properties": {
+          "now": {"type": "string", "format": "date-time"},
+          "events": {"type": "array", "items": {"$ref": "#/components/schemas/Event"}}
+        }
+      },
+      "RelayEventList": {
+        "type": "object",
+        "required": ["now", "events", "next_cursor"],
+        "properties": {
+          "now": {"type": "string", "format": "date-time"},
+          "events": {"type": "array", "items": {"$ref": "#/components/schemas/Event"}},
+          "next_cursor": {"type": "integer", "minimum": 0}
+        }
+      },
+      "DaemonSnapshot": {
+        "type": "object",
+        "required": ["now", "jobs", "events", "abandon_after_seconds", "abandon_waiting_after_seconds"],
+        "properties": {
+          "now": {"type": "string", "format": "date-time"},
+          "jobs": {"type": "array", "items": {"$ref": "#/components/schemas/Job"}},
+          "events": {"type": "array", "items": {"$ref": "#/components/schemas/Event"}},
+          "abandon_after_seconds": {"type": "integer", "minimum": 0},
+          "abandon_waiting_after_seconds": {"type": "integer", "minimum": 0}
+        }
+      },
+      "DaemonHealth": {
+        "type": "object",
+        "required": ["ok", "relay"],
+        "properties": {
+          "ok": {"type": "boolean", "const": true},
+          "relay": {"$ref": "#/components/schemas/RelayStatus"}
+        }
+      },
+      "RelayStatus": {
+        "type": "object",
+        "required": ["configured", "last_ok", "cursor", "last_error"],
+        "properties": {
+          "configured": {"type": "boolean"},
+          "last_ok": {"type": ["string", "null"], "format": "date-time"},
+          "cursor": {"type": "integer"},
+          "last_error": {"type": "string"}
+        }
+      },
+      "Applied": {
+        "type": "object",
+        "required": ["ok", "applied"],
+        "properties": {
+          "ok": {"type": "boolean", "const": true},
+          "applied": {"type": "boolean"}
+        }
+      },
+      "ClearResult": {
+        "type": "object",
+        "required": ["ok", "deleted", "backup"],
+        "properties": {
+          "ok": {"type": "boolean", "const": true},
+          "deleted": {"type": "integer", "minimum": 0},
+          "backup": {"type": "string", "description": "Absolute path of jobs-backup-<unix>.jsonl."}
+        }
+      },
+      "Error": {
+        "type": "object",
+        "required": ["ok", "error"],
+        "properties": {
+          "ok": {"type": "boolean", "const": false},
+          "error": {"type": "string"}
+        }
+      },
+      "MintRequest": {
+        "type": "object",
+        "required": ["kind"],
+        "properties": {
+          "kind": {"type": "string", "enum": ["read", "write"]},
+          "agent": {"type": "string", "description": "Required for write. Forbidden for read."},
+          "label": {"type": ["string", "null"], "maxLength": 200}
+        }
+      },
+      "MintResult": {
+        "type": "object",
+        "required": ["ok", "id", "token", "kind", "created"],
+        "properties": {
+          "ok": {"type": "boolean", "const": true},
+          "id": {"type": "string"},
+          "token": {"type": "string", "description": "spw_ or spr_ secret. Returned once."},
+          "kind": {"type": "string", "enum": ["read", "write"]},
+          "agent": {"type": ["string", "null"]},
+          "label": {"type": ["string", "null"]},
+          "created": {"type": "string", "format": "date-time"}
+        }
+      },
+      "TokenList": {
+        "type": "object",
+        "required": ["ok", "tokens"],
+        "properties": {
+          "ok": {"type": "boolean", "const": true},
+          "tokens": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["id", "kind", "created"],
+              "properties": {
+                "id": {"type": "string"},
+                "kind": {"type": "string", "enum": ["read", "write"]},
+                "agent": {"type": ["string", "null"]},
+                "label": {"type": ["string", "null"]},
+                "created": {"type": "string", "format": "date-time"}
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

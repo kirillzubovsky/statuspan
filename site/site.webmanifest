@@ -1,0 +1,19 @@
+{
+  "name": "StatusPan",
+  "short_name": "StatusPan",
+  "description": "Local board for which AI agent is working on what.",
+  "lang": "en",
+  "start_url": "/",
+  "scope": "/",
+  "display": "browser",
+  "background_color": "#1b1c20",
+  "theme_color": "#1b1c20",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

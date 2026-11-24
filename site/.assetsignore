@@ -1,3 +1,4 @@
+# _headers is read by Cloudflare and is not a public file. Do not ignore it.
 wrangler.jsonc
 .assetsignore
 **/.DS_Store

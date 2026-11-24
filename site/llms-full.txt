@@ -1,0 +1,566 @@
+# StatusPan
+
+> Complete reference for the local daemon and the optional self-hosted relay. StatusPan is one Go binary on loopback, plus an airport-style board. Agents push job updates. StatusPan never pushes back: no nudges, no webhooks, and no board buttons that edit a job. Clear all is the only action that removes jobs, and it asks first.
+
+Source: <https://github.com/kirillzubovsky/statuspan>. MIT license. Short version: <https://statuspan.com/llms.txt>. Machine-readable: <https://statuspan.com/openapi.json> and <https://statuspan.com/schema/job-update.schema.json>.
+
+Examples use `MyBot`, `Writer`, `Builder`, `build-1`, `docs-refresh`, `http://127.0.0.1:4477`, `https://example.com`, and `https://relay.example.com`. A real self-hosted relay looks like `https://statuspan-relay.<your-account>.workers.dev`.
+
+## Install and serve
+
+```bash
+curl -fsSL https://statuspan.com/install.sh | sh
+statuspan serve
+```
+
+The installer detects macOS or Linux, arm64 or amd64, downloads the release binary, and installs it to `~/.local/bin/statuspan`. No sudo. Then open <http://127.0.0.1:4477>.
+
+The board groups Needs attention (failed, blocked, stalled, and abandoned), then In progress. Queued and Done stay folded until opened. `T` toggles day and night.
+
+## What belongs on the board
+
+StatusPan tracks dispatched jobs that have a finish line.
+
+Healthy recurring jobs and scheduled routines stay off the board. Do not clutter it with daily or hourly runs that are going fine.
+
+Exception: if a recurring job becomes `blocked` (it needs human input or approval) or `failed`, push it so it surfaces in Needs attention. A blocked or failed recurring job must be pushed. Once it is fixed or unblocked, push `done` so it clears out of Needs attention.
+
+A routine may still post a separate job when that run produces real, finishable work (for example an inbox check that found a reply to handle). A quiet routine run never appears.
+
+## States
+
+You may post `queued`, `running`, `blocked`, `done`, or `failed`.
+
+`stalled` and `abandoned` are not states. They are derived when a job is read. They are not written into the log. Posting either word is a 400: `state must be queued, running, blocked, done, or failed`.
+
+- `queued`: accepted, not started. Does not stall. Abandoned after the waiting window (default 7 days).
+- `running`: work in progress. Stalls after `ttl` with no applied heartbeat. Then abandoned after the longer running window.
+- `blocked`: a person has to act (approval or input). Shows under Needs attention immediately. Does not stall. Abandoned after the waiting window.
+- `done`: finished well. Never abandoned. Folded under Done, so it leaves Needs attention.
+- `failed`: finished badly. Never abandoned. Stays under Needs attention until a later applied post moves it (usually `done` once fixed).
+
+A new job must include `state`. A later post may omit it, and the stored state stays.
+
+## Stalled and abandoned
+
+Default `ttl` is 600 seconds (10 minutes), used when a new job omits `ttl`.
+
+Stalled:
+
+- Only `running` can stall. Queued, blocked, done, and failed never stall.
+- Stalled when the age since `updated_at` is greater than `ttl` seconds. At the exact threshold it is not stalled yet.
+- `ttl` of 0 stalls a running job as soon as the age is greater than zero.
+- An abandoned job is not stalled.
+
+Abandoned, also derived, and only after the silence is strictly longer than the threshold. `abandoned_at` is `updated_at` plus that threshold.
+
+- A running job is abandoned only after it is already stalled, once the silence is longer than `max(abandon-after, 4 * ttl)`. Default `abandon-after` is 24h. With `ttl` 7200 (2h), `4 * ttl` is 8h, so the job stalls at 2h and is abandoned at 24h. With a large `ttl`, `4 * ttl` wins when it is longer than 24h. `ttl` 0 uses `abandon-after` alone.
+- A queued or blocked job does not stall. It is abandoned after `abandon-waiting-after` (default 168h, 7 days). That window is not multiplied by `ttl`.
+- Done and failed are never abandoned.
+- At the exact threshold the job is not abandoned yet. One instant later it is.
+- Set either window to `0` to disable that category. Set both to `0` to disable auto-abandon. The relay does not take these flags. It always uses 24h and 7 days.
+- A new applied post revives the job. `updated_at` moves, and abandoned is computed again, so the job returns to its posted state. An equal or older `seq` stays in history and does not revive it.
+
+`GET /api/jobs` and the daemon SSE snapshot include `abandon_after_seconds` and `abandon_waiting_after_seconds`. `0` means that category is off. The relay job list does not include those two fields. Each job still has `stalled`, `abandoned`, and, when abandoned, `abandoned_at`.
+
+## Payload
+
+`POST` one JSON object, or an array of them. `Content-Type: application/json`. Body limit is 1 MiB (`1048576` bytes). Empty, whitespace, and JSON `null` are `400` `empty body`. A larger body is `400` `body too large`. Broken JSON or a wrong field type is `400` `invalid json`. The relay also rejects a batch of more than 1000 items with `too many updates`. The daemon has no item cap other than the body size.
+
+The batch is validated before anything is written. A validation error writes nothing.
+
+| Field | JSON | Rule |
+| --- | --- | --- |
+| `agent` | string | Required. Trimmed blank is `agent is required`. Must not contain `/`, `\`, or NUL (`agent must not contain / or \`). |
+| `job_id` | string | Same rules, message says `job_id`. The key is `(agent, job_id)`. |
+| `state` | string | Optional on an existing job. One of `queued`, `running`, `blocked`, `done`, `failed`. Empty or omitted leaves the stored state. |
+| `title` | string | Optional. Omit to leave it. `""` clears it. |
+| `progress` | integer | Optional, 0 through 100. Omit to leave it. Out of range: `progress must be an integer from 0 to 100`. |
+| `link` | string | Optional. Any string. Not checked as a URL. Omit to leave it. `""` clears it. |
+| `note` | string | Optional. Omit to leave it. `""` clears it. |
+| `seq` | integer | Optional. See below. |
+| `ttl` | integer | Optional, `>= 0`. Omit on create and the job gets 600. Negative: `ttl must be >= 0`. |
+
+Unknown fields are ignored. JSON `null` on `title`, `link`, `note`, `progress`, `seq`, or `ttl` means omitted. On the daemon, JSON `null` for `agent`, `job_id`, or `state` is `invalid json`. On the relay, `null` for `agent` or `job_id` is treated as blank and then fails with `agent is required` or `job_id is required`. `null` for `state` is `invalid json` on both. There are no other job fields.
+
+Schema: <https://statuspan.com/schema/job-update.schema.json>.
+
+## Merge and seq
+
+Current state is one card per `(agent, job_id)`. Every post is appended first. Then it merges, or it does not.
+
+- A missing `seq` is newer. The post always applies, even if the card already has a seq. The stored seq is left as it was.
+- A present `seq` applies when the card has no seq yet, or when the new seq is strictly greater.
+- An equal or lower seq is stored in history with `applied: false` and does not change title, state, progress, link, note, ttl, seq, or `updated_at`.
+- `applied` on the HTTP response is true if any item in the batch changed a card. An ignored seq is still HTTP 200.
+- `finished_at` is set the first time a card becomes `done` or `failed`. Moving back to `queued`, `running`, or `blocked` clears it.
+- History on the card keeps the last 20 events, oldest first. The daemon's global feed keeps the last 200, newest first.
+- A heartbeat that repeats the same seq does not move `updated_at`, so a running job can still stall. Omit `seq`, or send a greater one, to refresh the clock.
+- `n` on a daemon event, and `cursor` on a relay event, are the log id. They are not `seq`. Do not send `n` or `cursor` as if they were `seq`.
+
+`statuspan ls` prints the job id when the title is empty. Its STALLED column is `ABANDONED`, `STALLED`, or `-`.
+
+## Local CLI
+
+`statuspan` with no arguments, or with a leading dash, is `serve`. `version`, `-version`, and `--version` must be the first argument. Untagged builds print `statuspan 0.1.0`. Release builds replace that with ldflags. The `v0.1.1` tag is the current release.
+
+Exit code is 1 on error. The message is prefixed `statuspan: `.
+
+### statuspan serve
+
+```text
+statuspan [serve] [--addr host:port] [--data dir]
+          [--abandon-after DUR] [--abandon-waiting-after DUR]
+          [--relay-url URL] [--relay-workspace NAME] [--relay-token-file PATH]
+```
+
+| Flag | Default | Env | Meaning |
+| --- | --- | --- | --- |
+| `--addr` | `127.0.0.1:4477` | `STATUSPAN_ADDR` | Listen address. Loopback only: `127.0.0.0/8`, `::1`, or `localhost`. Anything else is refused. |
+| `--data` | OS config dir + `statuspan` | `STATUSPAN_DATA` | Data directory. macOS: `~/Library/Application Support/statuspan`. Linux: `$XDG_CONFIG_HOME/statuspan` or `~/.config/statuspan`. If neither home nor config dir resolves: `./statuspan-data`. |
+| `--abandon-after` | `24h` | `STATUSPAN_ABANDON_AFTER` | Go duration (`24h`, `168h`, `0`). Silence before a stalled running job is abandoned. `0` disables that category. An explicit flag wins over the env. |
+| `--abandon-waiting-after` | `168h` | `STATUSPAN_ABANDON_WAITING_AFTER` | Silence before a queued or blocked job is abandoned. `0` disables it. Not multiplied by `ttl`. |
+| `--relay-url` | empty | `STATUSPAN_RELAY_URL` | Relay base URL. Wins over the env and over `relay.json`. |
+| `--relay-workspace` | empty | `STATUSPAN_RELAY_WORKSPACE` | Workspace name. Same precedence. |
+| `--relay-token-file` | empty | `STATUSPAN_RELAY_READ_TOKEN` | File containing the read token (`spr_...`), one line, trimmed. The env is the token itself, not a path. |
+
+Relay config order is flag, then environment, then `relay.json` in the data directory. If URL, workspace, or read token is set and another of the three is missing, serve exits instead of going local. If none are set, the daemon never calls out.
+
+`relay.json`:
+
+```json
+{"url":"https://relay.example.com","workspace":"home","read_token":"<read token>"}
+```
+
+`chmod 600` that file. The read token is not logged and is not returned by `/healthz`.
+
+The HTTP server's read-header timeout is 10 seconds. SIGINT or SIGTERM shuts it down within 3 seconds.
+
+### statuspan post
+
+```text
+statuspan post --agent A --job ID [--state STATE] [--title T] [--progress N]
+               [--link URL] [--note N] [--seq N] [--ttl S]
+               [--addr host:port | --relay URL --workspace NAME (--token TOKEN | --token-file PATH)]
+```
+
+| Flag | Default | Notes |
+| --- | --- | --- |
+| `--agent` | empty | Required. |
+| `--job` | empty | Required. This is `job_id`. |
+| `--state` | empty | Sent as `""` when omitted, which leaves an existing job's state. A new job still needs a real state. |
+| `--title` | omitted | Sent only if you pass the flag. `--title ""` clears it. |
+| `--link` | omitted | Same as title. |
+| `--note` | omitted | Same as title. |
+| `--progress` | omitted | Integer 0 through 100. The CLI checks the range. |
+| `--ttl` | omitted | Integer `>= 0`. The CLI checks it. |
+| `--seq` | omitted | Integer. Older or equal values are ignored by the server. |
+| `--addr` | `127.0.0.1:4477` | Env `STATUSPAN_ADDR`. Used only for a local post. |
+| `--relay` | empty | Env `STATUSPAN_RELAY_URL` when the flag is omitted. |
+| `--workspace` | empty | Env `STATUSPAN_RELAY_WORKSPACE` when the flag is omitted. |
+| `--token` | empty | Write token. Env `STATUSPAN_TOKEN` when neither token flag is passed. |
+| `--token-file` | empty | File with the write token. Cannot be combined with `--token`. |
+
+Local post timeout is 10 seconds. The command prints the JSON body. Status 300 or higher is an error.
+
+If any of relay URL, workspace, or write token is set, all three are required. A partial set fails and does not post to the local daemon. Leave all of them unset to post locally. The daemon's read token (`STATUSPAN_RELAY_READ_TOKEN`) is not the post token.
+
+Relay post: `POST {relay}/v1/w/{workspace}/jobs` with `Authorization: Bearer {write token}` and the same JSON. Timeout 10 seconds. A relay error prints the HTTP status and the relay's `error` string.
+
+### statuspan ls
+
+`statuspan ls [--addr host:port]`. `GET /api/jobs`. Prints `no jobs`, or a table: AGENT, JOB, STATE, PROG, ELAPSED, STALLED, TITLE, NOTE. Timeout 10 seconds.
+
+### statuspan clear
+
+`statuspan clear --yes [--addr host:port]`. Without `--yes` it changes nothing and exits 1 (`clear deletes every job; pass --yes`). With `--yes` it calls `DELETE /api/jobs?confirm=all` and prints `deleted N` and the backup path.
+
+### statuspan version / help
+
+`statuspan version`, `statuspan -version`, `statuspan --version`.
+
+`statuspan help`, `-h`, or `--help` prints usage. Any other first word is `unknown command "..." (try statuspan help)`.
+
+## Local HTTP API
+
+Base URL `http://127.0.0.1:4477`. No auth. No CORS headers. Loopback only, so a browser on another origin is not the client you want. JSON responses use `Content-Type: application/json; charset=utf-8` and `X-Content-Type-Options: nosniff`. Errors are `{"ok":false,"error":"..."}` unless noted.
+
+### GET /healthz
+
+`200`:
+
+```json
+{"ok":true,"relay":{"configured":false,"last_ok":null,"cursor":0,"last_error":""}}
+```
+
+`configured` is false in local-only mode. `last_ok` is an RFC3339 timestamp after a successful relay poll, otherwise null. `cursor` is the last merged relay event id. `last_error` is empty when the last poll worked. The token is never included.
+
+### GET /
+
+The embedded board, `text/html; charset=utf-8`, `Cache-Control: no-store`. This is the daemon UI, not the marketing site.
+
+### GET /favicon.ico
+
+`204` empty.
+
+### POST /api/jobs
+
+One JobUpdate or an array. `200`:
+
+```json
+{"ok":true,"applied":true}
+```
+
+`400` error strings include `unreadable body`, `body too large`, `empty body`, `invalid json`, `agent is required`, `job_id is required`, `agent must not contain / or \`, `job_id must not contain / or \`, `state must be queued, running, blocked, done, or failed`, `progress must be an integer from 0 to 100`, `ttl must be >= 0`. A store failure that is not a validation error is `500` with `error` set to that message.
+
+### GET /api/jobs
+
+`200`. Jobs are sorted by agent ascending, then `updated_at` descending, then `job_id` ascending. An empty board is `"jobs": []`.
+
+```json
+{
+  "now": "2026-11-23T18:00:00Z",
+  "jobs": [],
+  "abandon_after_seconds": 86400,
+  "abandon_waiting_after_seconds": 604800
+}
+```
+
+Each job:
+
+```json
+{
+  "agent": "MyBot",
+  "job_id": "build-1",
+  "title": "Build v1",
+  "state": "running",
+  "progress": 40,
+  "link": "https://example.com",
+  "seq": 1,
+  "ttl": 600,
+  "note": "almost there",
+  "started_at": "2026-11-23T17:00:00Z",
+  "updated_at": "2026-11-23T17:40:00Z",
+  "elapsed_seconds": 2400,
+  "stalled": false,
+  "abandoned": false,
+  "history": []
+}
+```
+
+`link`, `note`, and `seq` are omitted when empty or unset, not sent as null. `finished_at` and `abandoned_at` are omitted until set. The example above includes `link`, `note`, and `seq` because they are set. `abandoned_at` is present only when `abandoned` is true. `elapsed_seconds` is the age from `started_at`, and for `done` or `failed` it stops at `finished_at`. It is never negative. `history` is the last 20 events, oldest first. `deleted` appears only on a live delete event (see SSE), not on a listed job.
+
+### GET /api/jobs/{agent}/{job_id}
+
+`200` with that job object. `404` `{"ok":false,"error":"not found"}`.
+
+### DELETE /api/jobs/{agent}/{job_id}
+
+Removes one job and appends a delete tombstone. `200` `{"ok":true,"deleted":true}`. `deleted` is false when the job was already gone. That is still 200. Invalid ids are `400`.
+
+### DELETE /api/jobs
+
+Deletes every job and its history. Requires confirmation.
+
+- Query `?confirm=all`, or a JSON body `{"confirm":"all"}`.
+- If the query contains `confirm`, the body is ignored. Any value other than `all` is `400` `confirm must be "all"`.
+- A missing or empty body, when there is no query, is the same 400.
+- Invalid JSON is `400` `invalid json`.
+
+`200`:
+
+```json
+{"ok":true,"deleted":2,"backup":"/path/to/jobs-backup-1764000000.jsonl"}
+```
+
+`backup` is the absolute path of a copy of the log, `jobs-backup-<unix>.jsonl`, taken before the log is truncated. `deleted` is how many jobs were removed. A second clear returns `deleted: 0` and another backup file. A failure to copy or truncate is `500`.
+
+### GET /api/events
+
+Query:
+
+- `limit`. Default 200. `0` returns `"events": []`. A negative or non-integer value is `400` `invalid limit`. The global feed is capped at 200 even if you ask for more.
+- `agent`. When set, events are that agent's, newest first, and they are not capped at 200 unless you also set `limit`.
+
+`200`:
+
+```json
+{"now":"2026-11-23T18:00:00Z","events":[]}
+```
+
+An event, newest first:
+
+```json
+{
+  "n": 4,
+  "agent": "MyBot",
+  "job_id": "build-1",
+  "state": "running",
+  "progress": 40,
+  "note": "almost there",
+  "title": "Build v1",
+  "link": "https://example.com",
+  "ts": "2026-11-23T17:40:00Z",
+  "applied": true,
+  "seq": 2,
+  "kind": "update"
+}
+```
+
+Empty optional strings are omitted. `kind` is `update` or `delete`. `applied` is false when seq lost.
+
+### GET /api/stream
+
+Server-Sent Events. `Content-Type: text/event-stream`, `Cache-Control: no-cache`. A comment line `: keepalive` is sent every 15 seconds.
+
+On connect, one snapshot, which is the same board as `GET /api/jobs` plus the recent event feed:
+
+```text
+event: snapshot
+data: {"now":"...","jobs":[],"events":[],"abandon_after_seconds":86400,"abandon_waiting_after_seconds":604800}
+```
+
+Then one event per applied change:
+
+```text
+event: job
+data: {"agent":"MyBot","job_id":"build-1","state":"running","stalled":false,"abandoned":false,"history":[]}
+```
+
+A delete is a `job` event with `"deleted": true` and a one-item history of `kind: "delete"`. An ignored seq does not emit a job event. If the response cannot flush, the status is `500` and the body is plain text `streaming unsupported`.
+
+## Self-hosted relay
+
+`relay/` is a Cloudflare Worker with one SQLite Durable Object per workspace. You deploy it yourself. The marketing site does not host your jobs.
+
+```bash
+cd relay
+npm install
+npx wrangler login
+npx wrangler deploy
+openssl rand -hex 32 > admin-token
+npx wrangler secret put ADMIN_TOKEN < admin-token
+chmod 600 admin-token
+```
+
+`ADMIN_TOKEN` is the Worker secret. Bots do not send it. It creates workspaces and mints, lists, and revokes tokens.
+
+```bash
+export RELAY_URL=https://relay.example.com
+export ADMIN_TOKEN=$(cat admin-token)
+node scripts/admin.mjs create-workspace home
+node scripts/admin.mjs mint home --kind write --agent MyBot --label laptop --out write-token
+node scripts/admin.mjs mint home --kind read --label board --out read-token
+chmod 600 write-token read-token
+```
+
+`--out` writes only the token (mode 0600) and prints `saved to <path>`. `list` prints token ids, kinds, agents, and labels, not the secrets. `revoke` takes the token id.
+
+Workspace names match `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`.
+
+Tokens are random 32 bytes. A write token is prefixed `spw_`. A read token is prefixed `spr_`. Only the SHA-256 of the token is stored.
+
+- A write token is scoped to one agent. It can `POST` updates for that agent. It cannot list jobs, poll events, or open the stream (`403` `write token cannot read`). Posting any other agent name in the batch is `403` `token is scoped to a different agent`.
+- A read token can `GET` jobs, events, and the stream. It cannot post (`403` `read token cannot write`). It has no agent.
+- Missing or unknown bearer is `401` `{"ok":false,"error":"unauthorized"}`.
+- A workspace that was never created is `404` `workspace not found`, including for a token check.
+- A bad workspace name is `400` `invalid workspace`.
+- Wrong method is `405` `method not allowed`, with an `Allow` header.
+- Unknown paths are `404` `not found`.
+- An unexpected failure is `500` `internal error`. The Worker does not return the internal message.
+- No CORS headers.
+
+`GET /healthz` on the relay is not the daemon's JSON. It is `200` text `ok\n` (`text/plain; charset=utf-8`).
+
+### POST /v1/w/{workspace}/jobs
+
+Bearer write token. Same body and the same field rules as `POST /api/jobs`. Same `200` `{"ok":true,"applied":true|false}`.
+
+Extra `400` strings: `invalid content-length`, `too many updates`.
+
+### GET /v1/w/{workspace}/jobs
+
+Bearer read token. `200`:
+
+```json
+{"now":"2026-11-23T18:00:00.000Z","jobs":[]}
+```
+
+Jobs have the same shape as the daemon, including `stalled` and `abandoned`, computed with the fixed 24h and 7 day windows. There is no `abandon_after_seconds` field. There is no single-job GET and no DELETE.
+
+### GET /v1/w/{workspace}/events
+
+Bearer read token.
+
+| Query | Rule |
+| --- | --- |
+| `since` | Exclusive cursor. Default 0. Non-digits: `400` `invalid since`. |
+| `limit` | Default 200. `0` returns no events. Above 1000 is capped at 1000. Non-digits: `400` `invalid limit`. |
+
+`200`, events in ascending cursor order (this is the poll direction, oldest of the page first):
+
+```json
+{
+  "now": "2026-11-23T18:00:00.000Z",
+  "events": [],
+  "next_cursor": 0
+}
+```
+
+`next_cursor` is the cursor of the last event in this page, or `since` when the page is empty. Relay events include `cursor` and `n` set to the same id, plus the same fields as a daemon event. `kind` is `update`. The relay keeps at most 50000 events. Job history on a job object is the last 20, oldest first.
+
+### GET /v1/w/{workspace}/stream
+
+Bearer read token. SSE, `text/event-stream; charset=utf-8`. Keepalive comment every 15 seconds.
+
+```text
+event: snapshot
+data: {"now":"...","jobs":[],"events":[]}
+
+event: job
+data: {"agent":"MyBot","job_id":"build-1","state":"running","stalled":false,"abandoned":false,"history":[]}
+```
+
+The snapshot's `events` are the 200 newest. It does not include the abandon-window fields. Later frames are applied job views only.
+
+### Admin routes
+
+Bearer `ADMIN_TOKEN`, not an `spr_` or `spw_` token.
+
+| Method and path | Body | Success |
+| --- | --- | --- |
+| `POST /v1/admin/workspaces/{workspace}` | none | `200` `{"ok":true,"created":true}`. `created` is false if it already existed. |
+| `POST /v1/admin/workspaces/{workspace}/tokens` | `{"kind":"write","agent":"MyBot","label":"laptop"}` or `{"kind":"read","label":"board"}` | `200` includes `id`, `token` (shown once), `kind`, `agent`, `label`, `created`. |
+| `GET /v1/admin/workspaces/{workspace}/tokens` | none | `200` `{"ok":true,"tokens":[{"id","kind","agent","label","created"}]}`. No secrets. |
+| `DELETE /v1/admin/workspaces/{workspace}/tokens/{id}` | none | `200` `{"ok":true,"revoked":true}`. Unknown id: `404` `not found`. |
+
+Mint rules: `kind` is `read` or `write`. A write token requires `agent`. A read token must not set `agent` (`read tokens cannot set agent`). `label` is an optional string up to 200 characters. Empty body is `400` `empty body`.
+
+### How the daemon pulls
+
+On start, and about every 3 seconds after a success, the daemon calls:
+
+```text
+GET {url}/v1/w/{workspace}/events?since={cursor}&limit=1000
+Authorization: Bearer {read token}
+```
+
+It merges each `update` with `ApplyAt` so the event's own timestamp is kept, using the same seq rules as a local post. The cursor is saved in `relay-cursor` in the data directory. A repeated cursor is a no-op. Failures back off, with jitter, from 1 second, doubling, up to about 60 seconds. Errors are logged without the token. Merged jobs go out on the local SSE stream.
+
+Point `statuspan serve` at the relay with the flags above, or with `relay.json`. Restart after changing the file.
+
+Post from an agent that is not on this machine:
+
+```bash
+curl --max-time 2 -s -X POST "$RELAY_URL/v1/w/home/jobs" \
+  -H "Authorization: Bearer $STATUSPAN_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"agent":"MyBot","job_id":"build-1","title":"Build v1","state":"running","seq":1}' \
+  || true
+```
+
+Or:
+
+```bash
+statuspan post --relay "$RELAY_URL" --workspace home --token-file write-token \
+  --agent MyBot --job build-1 --state running --progress 55 --note halfway
+```
+
+Read:
+
+```bash
+curl -s "$RELAY_URL/v1/w/home/jobs" -H "Authorization: Bearer $(cat read-token)"
+curl -s "$RELAY_URL/v1/w/home/events?since=0" -H "Authorization: Bearer $(cat read-token)"
+```
+
+## Fire and forget
+
+If the post fails or times out, continue the real work. Do not retry in a loop. Do not wait on the board.
+
+Bash:
+
+```bash
+curl --max-time 2 -s -X POST http://127.0.0.1:4477/api/jobs \
+  -H 'Content-Type: application/json' \
+  -d '{"agent":"MyBot","job_id":"build-1","title":"Build v1","state":"running","progress":40,"seq":1}' \
+  || true
+```
+
+Python, standard library only:
+
+```python
+import json
+import urllib.request
+
+def statuspan_post(update):
+    req = urllib.request.Request(
+        "http://127.0.0.1:4477/api/jobs",
+        data=json.dumps(update).encode(),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=2) as resp:
+            resp.read()
+    except Exception:
+        pass
+
+statuspan_post({
+    "agent": "Writer",
+    "job_id": "docs-refresh",
+    "title": "Refresh the docs",
+    "state": "running",
+    "seq": 1,
+})
+```
+
+Node.js:
+
+```javascript
+async function statuspanPost(update) {
+  try {
+    await fetch("http://127.0.0.1:4477/api/jobs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(update),
+      signal: AbortSignal.timeout(2000),
+    });
+  } catch {
+    // StatusPan is optional. Keep working.
+  }
+}
+
+await statuspanPost({
+  agent: "Builder",
+  job_id: "build-1",
+  title: "Build v1",
+  state: "running",
+  progress: 40,
+  seq: 1,
+});
+```
+
+For the relay, change the URL to `https://relay.example.com/v1/w/home/jobs` and add `Authorization: Bearer <spw_ write token>`. Same body. Same timeout. Same ignore-on-failure rule.
+
+## Agent guidance
+
+Pick one `job_id` slug per piece of work and keep it: `build-1`, `docs-refresh`. Reuse it for every heartbeat. A new slug is a new card. Do not put secrets in any field. Do not use `/` or `\` in `agent` or `job_id`.
+
+Emit:
+
+- `queued` when the work is accepted and you have not started.
+- `running` as you start, and again as a heartbeat before `ttl` seconds (default 600). Send progress or a note. Increase `seq`, or omit `seq`.
+- `blocked` when you need a person. Say why in `note`.
+- `done` when you reach the finish line. That is what clears a card out of Needs attention.
+- `failed` when you stop unsuccessfully. Include a useful `note`.
+
+Never block real work if StatusPan is offline. The snippets above are the pattern.
+
+Recurring jobs, in full:
+
+- Healthy recurring jobs and scheduled routines stay off the board. A daily or hourly run that is going fine must not get a card.
+- If a recurring job becomes `blocked` or `failed`, it must be pushed so it surfaces in Needs attention.
+- Once that recurring job is fixed or unblocked, push `done` so it clears out of Needs attention.
+- A routine that produces a separate, finishable piece of work can post that work under its own `job_id`. A quiet run posts nothing.
+
+Do not post `stalled` or `abandoned`. Do not clear the board unless a person asked for `statuspan clear --yes`.

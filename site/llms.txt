@@ -1,0 +1,35 @@
+# StatusPan
+
+> StatusPan is an open-source local board for which AI agent is working on what. One Go binary listens on loopback. Agents push job updates and never get a callback. A self-hosted Cloudflare relay is optional for agents on another machine.
+
+Quick install, then serve. The board is at http://127.0.0.1:4477.
+
+```bash
+curl -fsSL https://statuspan.com/install.sh | sh
+statuspan serve
+```
+
+Post one update to the local daemon:
+
+```bash
+curl -s -X POST http://127.0.0.1:4477/api/jobs -H 'Content-Type: application/json' -d '{"agent":"MyBot","job_id":"build-1","title":"Build v1","state":"running","progress":40,"link":"https://example.com","seq":1,"ttl":600}'
+```
+
+## Protocol
+
+- States you can post: `queued`, `running`, `blocked`, `done`, `failed`.
+- `stalled` and `abandoned` are derived when the board is read. Bots cannot post them.
+- A running job with no heartbeat for `ttl` seconds (default 600) is stalled. Queued, blocked, done, and failed do not stall.
+- The latest `seq` for an `(agent, job_id)` wins. An equal or older seq stays in history and does not change the job. Omit `seq` and the post applies.
+- Partial updates merge. Omitted fields stay as they are. A new job needs `state`. A later post may omit it.
+- Fire and forget. If StatusPan is offline, keep working. Do not block the real job on the post.
+- Healthy recurring jobs and scheduled routines stay off the board. Do not clutter it with daily or hourly runs that are going fine. If a recurring job becomes `blocked` (it needs human input or approval) or `failed`, push it so it surfaces in Needs attention. Once it is fixed or unblocked, push `done` so it clears out of Needs attention.
+
+## Specs
+
+- [Full reference](https://statuspan.com/llms-full.txt): CLI, HTTP API, relay, and copy-paste clients
+- [Agent skill](https://statuspan.com/skill.md): drop-in instructions for a coding agent
+- [OpenAPI](https://statuspan.com/openapi.json): local daemon and self-hosted relay
+- [Job update schema](https://statuspan.com/schema/job-update.schema.json): JSON Schema for one update or a batch
+- [Installer](https://statuspan.com/install.sh): macOS and Linux, no sudo
+- [Source](https://github.com/kirillzubovsky/statuspan): MIT

@@ -3,12 +3,104 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="description" content="StatusPan is an open-source airport-style board for which AI agent is working on what. One local Go binary. Bots push with one curl.">
+<meta name="description" content="StatusPan is an open-source local board that shows which AI agent is working on what: one loopback Go binary, one-way job posts, and an optional self-hosted relay.">
+<meta name="robots" content="index, follow">
 <meta name="color-scheme" content="dark">
 <meta name="theme-color" content="#1b1c20">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
 <title>StatusPan — which bot is working on what</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Crect width='20' height='20' rx='6' fill='%238e96f2'/%3E%3Ccircle cx='10' cy='10' r='4' fill='none' stroke='%23222329' stroke-width='2'/%3E%3C/svg%3E">
+<link rel="canonical" href="https://statuspan.com/">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="/site.webmanifest">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="StatusPan">
+<meta property="og:title" content="StatusPan — which bot is working on what">
+<meta property="og:description" content="StatusPan is an open-source local board that shows which AI agent is working on what: one loopback Go binary, one-way job posts, and an optional self-hosted relay.">
+<meta property="og:url" content="https://statuspan.com/">
+<meta property="og:image" content="https://statuspan.com/og-image.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="StatusPan night board showing which bot is working on what">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="StatusPan — which bot is working on what">
+<meta name="twitter:description" content="StatusPan is an open-source local board that shows which AI agent is working on what: one loopback Go binary, one-way job posts, and an optional self-hosted relay.">
+<meta name="twitter:image" content="https://statuspan.com/og-image.png">
+<meta name="twitter:image:alt" content="StatusPan night board showing which bot is working on what">
+<meta name="twitter:creator" content="@kirillzubovsky">
+<link rel="alternate" type="text/plain" href="/llms.txt" title="llms.txt">
+<link rel="alternate" type="text/markdown" href="/skill.md" title="Agent skill">
+<link rel="alternate" type="application/json" href="/openapi.json" title="OpenAPI">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "SoftwareApplication",
+      "name": "StatusPan",
+      "applicationCategory": "DeveloperApplication",
+      "operatingSystem": "macOS, Linux",
+      "softwareVersion": "0.1.1",
+      "license": "https://opensource.org/licenses/MIT",
+      "downloadUrl": "https://statuspan.com/install.sh",
+      "codeRepository": "https://github.com/kirillzubovsky/statuspan",
+      "screenshot": "https://statuspan.com/airport-night.png",
+      "url": "https://statuspan.com/",
+      "description": "StatusPan is an open-source local board that shows which AI agent is working on what: one loopback Go binary, one-way job posts, and an optional self-hosted relay.",
+      "offers": {
+        "@type": "Offer",
+        "price": "0",
+        "priceCurrency": "USD"
+      },
+      "author": {
+        "@type": "Person",
+        "name": "Kirill Zubovsky"
+      }
+    },
+    {
+      "@type": "WebSite",
+      "name": "StatusPan",
+      "url": "https://statuspan.com/"
+    },
+    {
+      "@type": "FAQPage",
+      "mainEntity": [
+        {
+          "@type": "Question",
+          "name": "How does an agent post a job?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "POST JSON to http://127.0.0.1:4477/api/jobs. A new job needs agent, job_id, and state: queued, running, blocked, done, or failed. Later posts may omit state. The local daemon has no auth."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "What are stalled and abandoned?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "A running job with no heartbeat for ttl seconds (default 600) is stalled. Abandoned is later: max(24h, 4 × ttl) of silence for a running job, and 7 days for queued or blocked. Done and failed are never abandoned. Both are derived at read time. Agents cannot post them. A newer applied post revives the job."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Should a recurring job go on the board?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Healthy recurring jobs and scheduled routines stay off the board. If a recurring job becomes blocked or failed, post it so it shows under Needs attention. Once it is fixed or unblocked, post done so it clears out."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "What if StatusPan is offline?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Posting is fire-and-forget. If the daemon is down, keep doing the real work. The board is loopback only. An agent on another machine can post to a self-hosted relay with a write token (spw_). The daemon pulls that workspace with a read token (spr_). StatusPan never calls the agent back."
+          }
+        }
+      ]
+    }
+  ]
+}
+</script>
 <style>
 :root{
  --bg:#1b1c20;--surf:#222329;--surf2:#2a2b32;--border:#2f3138;--border2:#3a3c44;
@@ -57,7 +149,7 @@ a:hover{text-decoration:underline}
 .brow:last-child{border-bottom:0}
 .brow-h{min-height:32px;font-size:11.5px;font-weight:600;color:var(--text3);padding-top:0;padding-bottom:0}
 .b-title{font-weight:600}
-.b-detail{color:var(--text2);min-width:0}
+.b-detail{color:var(--text2);min-width:0;overflow-wrap:anywhere}
 .b-status{text-align:right}
 .steps{list-style:none;margin:0;padding:0}
 .steps li{display:grid;grid-template-columns:72px minmax(0,1fr);gap:16px;align-items:start;padding:16px 20px;border-bottom:1px solid var(--border)}
@@ -75,6 +167,10 @@ code{font:inherit}
 .note{margin:0;padding:12px 20px 16px;color:var(--text2)}
 .foot{display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center;padding:22px 0 40px;color:var(--text3);font-size:12px}
 .foot a{color:var(--text2)}
+@media (min-width:721px){
+ .brow.ask{grid-template-columns:minmax(180px,280px) minmax(0,1fr) 132px}
+ .brow.ask:not(.brow-h){align-items:start;padding-top:14px;padding-bottom:14px}
+}
 @media (max-width:720px){
  .hero h1{font-size:32px}
  .brow,.steps li{grid-template-columns:1fr;gap:4px;align-items:start}
@@ -195,6 +291,46 @@ code{font:inherit}
     <li><a href="https://github.com/kirillzubovsky/statuspan/releases/latest/download/statuspan-darwin-amd64">macOS Intel <span class="file mono">statuspan-darwin-amd64</span></a></li>
     <li><a href="https://github.com/kirillzubovsky/statuspan/releases/latest/download/statuspan-linux-amd64">Linux x86_64 <span class="file mono">statuspan-linux-amd64</span></a></li>
     <li><a href="https://github.com/kirillzubovsky/statuspan/releases/latest/download/statuspan-linux-arm64">Linux arm64 <span class="file mono">statuspan-linux-arm64</span></a></li>
+   </ul>
+  </section>
+
+  <section class="panel" aria-labelledby="faq">
+   <h2 class="sh" id="faq">FAQ</h2>
+   <div class="brow brow-h ask" aria-hidden="true"><span>Question</span><span>Answer</span><span>Status</span></div>
+   <div class="brow ask">
+    <span class="b-title">How does an agent post a job?</span>
+    <span class="b-detail">POST JSON to <span class="mono">http://127.0.0.1:4477/api/jobs</span>. A new job needs agent, job_id, and state: queued, running, blocked, done, or failed. Later posts may omit state. The local daemon has no auth.</span>
+    <span class="b-status word running">Push</span>
+   </div>
+   <div class="brow ask">
+    <span class="b-title">What are stalled and abandoned?</span>
+    <span class="b-detail">A running job with no heartbeat for ttl seconds (default 600) is stalled. Abandoned is later: max(24h, 4 × ttl) of silence for a running job, and 7 days for queued or blocked. Done and failed are never abandoned. Both are derived at read time. Agents cannot post them. A newer applied post revives the job.</span>
+    <span class="b-status word stalled">Derived</span>
+   </div>
+   <div class="brow ask">
+    <span class="b-title">Should a recurring job go on the board?</span>
+    <span class="b-detail">Healthy recurring jobs and scheduled routines stay off the board. If a recurring job becomes blocked or failed, post it so it shows under Needs attention. Once it is fixed or unblocked, post done so it clears out.</span>
+    <span class="b-status word blocked">Attention</span>
+   </div>
+   <div class="brow ask">
+    <span class="b-title">What if StatusPan is offline?</span>
+    <span class="b-detail">Posting is fire-and-forget. If the daemon is down, keep doing the real work. The board is loopback only. An agent on another machine can post to a self-hosted relay with a write token (spw_). The daemon pulls that workspace with a read token (spr_). StatusPan never calls the agent back.</span>
+    <span class="b-status word queued">Local</span>
+   </div>
+  </section>
+
+  <section class="panel" aria-labelledby="agents">
+   <h2 class="sh" id="agents">For AI agents</h2>
+   <div class="note">
+    <p>One fetch is enough to start posting. Healthy recurring jobs stay off the board. If a recurring job becomes blocked or failed, post it so it shows under Needs attention. Once it is fixed or unblocked, post <span class="mono">done</span> so it clears out.</p>
+    <pre><code>curl -fsSL https://statuspan.com/llms.txt</code></pre>
+   </div>
+   <ul class="dl">
+    <li><a href="/llms.txt">Short spec <span class="file mono">/llms.txt</span></a></li>
+    <li><a href="/llms-full.txt">Full reference <span class="file mono">/llms-full.txt</span></a></li>
+    <li><a href="/skill.md">Agent skill <span class="file mono">/skill.md</span></a></li>
+    <li><a href="/openapi.json">OpenAPI <span class="file mono">/openapi.json</span></a></li>
+    <li><a href="/schema/job-update.schema.json">Job update schema <span class="file mono">/schema/job-update.schema.json</span></a></li>
    </ul>
   </section>
 

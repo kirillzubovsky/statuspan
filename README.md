@@ -22,7 +22,11 @@ Abandoned is the next step after a long silence:
 
 ## What belongs on the board
 
-StatusPan tracks dispatched jobs that have a finish line. Recurring routines and watchers do not get their own cards. A routine run posts a job only when it produces real, finishable work (for example an inbox check that found a reply to handle). A quiet routine run never appears.
+StatusPan tracks dispatched jobs that have a finish line. Healthy recurring jobs and scheduled routines stay off the board. A daily or hourly run that is going fine does not get a card.
+
+If a recurring job becomes `blocked` (it needs human input or approval) or `failed`, push it. It then shows under Needs attention. Once it is fixed or unblocked, push `done` so it clears out of Needs attention.
+
+A routine can still post a separate job when it produces real, finishable work (for example an inbox check that found a reply to handle). A quiet routine run never appears.
 
 The relay in `relay/` is an optional Cloudflare Worker. Bots that are not on this machine post there. The daemon polls it and merges events into the local board. The same JSON body works for `POST /api/jobs` on the daemon and `POST /v1/w/<workspace>/jobs` on the relay.
 

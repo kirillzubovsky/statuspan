@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://statuspan.com/schema/job-update.schema.json",
+  "title": "StatusPan job update",
+  "description": "Body of POST /api/jobs on the local daemon and POST /v1/w/{workspace}/jobs on the relay. One JobUpdate object, or an array of them. Unknown fields are ignored. Null for an optional field means the field was omitted. The relay rejects a batch longer than 1000 items. Both servers reject a body over 1 MiB, an empty body, and JSON null.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/jobUpdate"
+    },
+    {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/jobUpdate"
+      }
+    }
+  ],
+  "$defs": {
+    "jobUpdate": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["agent", "job_id"],
+      "properties": {
+        "agent": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^(?=.*\\S)[^/\\\\\\u0000]+$",
+          "description": "Agent name. Required, not blank, and must not contain / or \\ or NUL. A relay write token may post only for its own agent."
+        },
+        "job_id": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^(?=.*\\S)[^/\\\\\\u0000]+$",
+          "description": "Stable id for this job. Same rules as agent. The card key is (agent, job_id)."
+        },
+        "title": {
+          "type": ["string", "null"],
+          "description": "Display title. Omit or null to leave the stored title unchanged. An empty string clears it."
+        },
+        "state": {
+          "type": "string",
+          "enum": ["", "queued", "running", "blocked", "done", "failed"],
+          "description": "Omit, or send an empty string, to leave state unchanged. A job that does not exist yet must set queued, running, blocked, done, or failed. stalled and abandoned are rejected."
+        },
+        "progress": {
+          "type": ["integer", "null"],
+          "minimum": 0,
+          "maximum": 100,
+          "description": "Integer 0 through 100. Omit or null to leave progress unchanged. A non-integer is invalid JSON at the server."
+        },
+        "link": {
+          "type": ["string", "null"],
+          "description": "Free-form link string. Not checked as a URL. Omit or null to leave it unchanged. An empty string clears it."
+        },
+        "note": {
+          "type": ["string", "null"],
+          "description": "Short note. Omit or null to leave it unchanged. An empty string clears it."
+        },
+        "seq": {
+          "type": ["integer", "null"],
+          "description": "Monotonic sequence. Omit or null and the post applies. An integer applies only when the job has no seq yet or this value is strictly greater. Equal or lower stays in history and does not change the job. The relay accepts safe integers only. The daemon accepts any int64. A non-integer is invalid JSON."
+        },
+        "ttl": {
+          "type": ["integer", "null"],
+          "minimum": 0,
+          "description": "Stall window in seconds for a running job. Omit or null on create and the server uses 600. 0 stalls a running job as soon as its age is greater than zero. A negative ttl is rejected."
+        }
+      }
+    }
+  }
+}
