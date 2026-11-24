@@ -26,7 +26,9 @@ import (
 	"github.com/kirillzubovsky/statuspan/internal/store"
 )
 
-const version = "0.1.0"
+// version is reported by `statuspan version`. Release builds override it with
+// -ldflags "-X main.version=<semver>". Untagged local builds keep this default.
+var version = "0.1.0"
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
@@ -38,6 +40,12 @@ func main() {
 }
 
 func run(args []string) error {
+	// Version flags must be handled before the serve shortcut. Any other
+	// leading dash is a serve flag, which would swallow --version.
+	if len(args) > 0 && isVersionArg(args[0]) {
+		fmt.Println("statuspan", version)
+		return nil
+	}
 	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
 		return serveCmd(args)
 	}
@@ -50,15 +58,16 @@ func run(args []string) error {
 		return lsCmd(args[1:])
 	case "clear":
 		return clearCmd(args[1:])
-	case "version", "-version", "--version":
-		fmt.Println("statuspan", version)
-		return nil
 	case "help", "-h", "--help":
 		usage()
 		return nil
 	default:
 		return fmt.Errorf("unknown command %q (try statuspan help)", args[0])
 	}
+}
+
+func isVersionArg(arg string) bool {
+	return arg == "version" || arg == "-version" || arg == "--version"
 }
 
 func usage() {

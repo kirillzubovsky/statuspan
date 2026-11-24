@@ -25,6 +25,42 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
+func TestVersionOutput(t *testing.T) {
+	for _, arg := range []string{"version", "-version", "--version"} {
+		t.Run(arg, func(t *testing.T) {
+			got, err := captureStdout(t, func() error { return run([]string{arg}) })
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := "statuspan " + version + "\n"
+			if got != want {
+				t.Fatalf("got %q want %q", got, want)
+			}
+		})
+	}
+}
+
+func captureStdout(t *testing.T, fn func() error) (string, error) {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := os.Stdout
+	os.Stdout = w
+	runErr := fn()
+	if err := w.Close(); err != nil {
+		os.Stdout = old
+		t.Fatal(err)
+	}
+	os.Stdout = old
+	var buf bytes.Buffer
+	if _, err := buf.ReadFrom(r); err != nil {
+		t.Fatal(err)
+	}
+	return buf.String(), runErr
+}
+
 func TestPostAllowsOmittedState(t *testing.T) {
 	st, err := store.Open(t.TempDir())
 	if err != nil {
