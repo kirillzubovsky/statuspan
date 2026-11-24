@@ -9,10 +9,16 @@ curl -fsSL https://statuspan.com/install.sh | sh
 statuspan serve
 ```
 
-Post one update to the local daemon:
+Post one update. The CLI posts to the relay when `STATUSPAN_RELAY_URL`, `STATUSPAN_RELAY_WORKSPACE`, and `STATUSPAN_TOKEN_FILE` are set, and to the local daemon otherwise.
 
 ```bash
-curl -s -X POST http://127.0.0.1:4477/api/jobs -H 'Content-Type: application/json' -d '{"agent":"MyBot","job_id":"build-1","title":"Build v1","state":"running","progress":40,"link":"https://example.com","seq":1,"ttl":600}'
+statuspan post --agent "My Agent" --job build-1 --state running --progress 40
+```
+
+As a backup, you can always use the URL with plain curl, as long as the URL is the one where StatusPan is actually running.
+
+```bash
+curl -s -X POST "${STATUSPAN_URL:-http://127.0.0.1:4477/api/jobs}" -H 'Content-Type: application/json' -d '{"agent":"My Agent","job_id":"build-1","state":"running","progress":40}'
 ```
 
 ## Protocol

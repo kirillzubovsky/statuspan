@@ -69,7 +69,7 @@
           "name": "How does an agent post a job?",
           "acceptedAnswer": {
             "@type": "Answer",
-            "text": "POST JSON to http://127.0.0.1:4477/api/jobs. A new job needs agent, job_id, and state: queued, running, blocked, done, or failed. Later posts may omit state. The local daemon has no auth."
+            "text": "Use statuspan post (or statuspan run). The CLI posts to the relay when STATUSPAN_RELAY_URL, STATUSPAN_RELAY_WORKSPACE, and STATUSPAN_TOKEN_FILE are set, and to the local daemon otherwise. As a backup, you can always use the URL with plain curl, as long as the URL is the one where StatusPan is actually running. A new job needs agent, job_id, and state: queued, running, blocked, done, or failed. Later posts may omit state. The local daemon has no auth."
           }
         },
         {
@@ -276,8 +276,9 @@ code{font:inherit}
       <b>Tell your agent</b>
       <pre><code>statuspan agent
 statuspan agent install
-statuspan run --agent "My Agent" --job build-1 -- make test</code></pre>
-      <p><span class="mono">statuspan agent</span> prints the skill. <span class="mono">statuspan agent install</span> writes it where agents look. <span class="mono">statuspan run</span> wraps a command, posts running then done or failed, and keeps that command's exit code.</p>
+# example: wrap any command
+statuspan run --agent "My Agent" --job hello -- sleep 5</code></pre>
+      <p><span class="mono">statuspan agent</span> prints the skill. <span class="mono">statuspan agent install</span> writes it where agents look. <span class="mono">statuspan run</span> wraps a command, posts running then done or failed, and keeps that command's exit code. The last two lines are only an example of wrapping your own command. <span class="mono">sleep 5</span> is a harmless demo.</p>
      </div>
     </li>
    </ol>
@@ -286,9 +287,11 @@ statuspan run --agent "My Agent" --job build-1 -- make test</code></pre>
   <section class="panel" aria-labelledby="post">
    <h2 class="sh" id="post">Post your first job</h2>
    <div class="note">
-    <p>With the daemon running, post the same way a bot would.</p>
-    <pre><code>curl -s -X POST localhost:4477/api/jobs -H 'Content-Type: application/json' -d '{"agent":"MyBot","job_id":"build-1","title":"Build v1","state":"running","progress":40,"link":"https://example.com","seq":1,"ttl":600}'</code></pre>
-    <p>Reload the board. MyBot / build-1 shows as running.</p>
+    <p>Use <span class="mono">statuspan post</span>. The CLI posts to the relay when <span class="mono">STATUSPAN_RELAY_URL</span>, <span class="mono">STATUSPAN_RELAY_WORKSPACE</span>, and <span class="mono">STATUSPAN_TOKEN_FILE</span> are set, and to the local daemon otherwise.</p>
+    <pre><code>statuspan post --agent "My Agent" --job build-1 --state running --progress 40</code></pre>
+    <p>As a backup, you can always use the URL with plain curl, as long as the URL is the one where StatusPan is actually running.</p>
+    <pre><code>curl -s -X POST "${STATUSPAN_URL:-http://127.0.0.1:4477/api/jobs}" -H 'Content-Type: application/json' -d '{"agent":"My Agent","job_id":"build-1","state":"running","progress":40}'</code></pre>
+    <p>Reload the board. My Agent / build-1 shows as running.</p>
    </div>
   </section>
 
@@ -308,7 +311,7 @@ statuspan run --agent "My Agent" --job build-1 -- make test</code></pre>
    <div class="brow brow-h ask" aria-hidden="true"><span>Question</span><span>Answer</span><span>Status</span></div>
    <div class="brow ask">
     <span class="b-title">How does an agent post a job?</span>
-    <span class="b-detail">POST JSON to <span class="mono">http://127.0.0.1:4477/api/jobs</span>. A new job needs agent, job_id, and state: queued, running, blocked, done, or failed. Later posts may omit state. The local daemon has no auth.</span>
+    <span class="b-detail">Use <span class="mono">statuspan post</span> (or <span class="mono">statuspan run</span>). The CLI posts to the relay when <span class="mono">STATUSPAN_RELAY_URL</span>, <span class="mono">STATUSPAN_RELAY_WORKSPACE</span>, and <span class="mono">STATUSPAN_TOKEN_FILE</span> are set, and to the local daemon otherwise. As a backup, you can always use the URL with plain curl, as long as the URL is the one where StatusPan is actually running. A new job needs agent, job_id, and state: queued, running, blocked, done, or failed. Later posts may omit state. The local daemon has no auth.</span>
     <span class="b-status word running">Push</span>
    </div>
    <div class="brow ask">
@@ -331,10 +334,11 @@ statuspan run --agent "My Agent" --job build-1 -- make test</code></pre>
   <section class="panel" aria-labelledby="agents">
    <h2 class="sh" id="agents">For AI agents</h2>
    <div class="note">
-    <p>The binary carries the skill. <span class="mono">statuspan agent</span> prints it. <span class="mono">statuspan agent install</span> writes it into the agent directories. <span class="mono">statuspan run</span> wraps a command and posts the outcome. Healthy recurring jobs stay off the board. If a recurring job becomes blocked or failed, post it so it shows under Needs attention. Once it is fixed or unblocked, post <span class="mono">done</span> so it clears out.</p>
+    <p>The binary carries the skill. <span class="mono">statuspan agent</span> prints it. <span class="mono">statuspan agent install</span> writes it into the agent directories. <span class="mono">statuspan run</span> wraps a command and posts the outcome. The last two lines below are only an example of wrapping your own command. <span class="mono">sleep 5</span> is a harmless demo. Healthy recurring jobs stay off the board. If a recurring job becomes blocked or failed, post it so it shows under Needs attention. Once it is fixed or unblocked, post <span class="mono">done</span> so it clears out.</p>
     <pre><code>statuspan agent
 statuspan agent install
-statuspan run --agent "My Agent" --job build-1 -- make test</code></pre>
+# example: wrap any command
+statuspan run --agent "My Agent" --job hello -- sleep 5</code></pre>
     <pre><code>curl -fsSL https://statuspan.com/llms.txt</code></pre>
    </div>
    <ul class="dl">
@@ -351,6 +355,7 @@ statuspan run --agent "My Agent" --job build-1 -- make test</code></pre>
    <span>MIT</span>
    <a href="https://github.com/kirillzubovsky/statuspan">GitHub</a>
    <a href="/cloud">StatusPan Cloud — join the waitlist</a>
+   <a href="https://kirillzubovsky.com">Made by Kirill Zubovsky</a>
   </footer>
  </div>
 </main>

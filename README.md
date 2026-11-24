@@ -42,9 +42,9 @@ The relay in `relay/` is an optional Cloudflare Worker. Bots that are not on thi
 
 Open http://127.0.0.1:4477 (`/` or `#/`). The home page is an airport-style board: Needs attention (failed, blocked, stalled, and abandoned), then In progress. Queued and Done stay folded until you open them. Each visible section header has its own clear: Clear on Needs attention, In progress, and Queued, and Clear done on Done. Clear all stays in the top menu. Coming back to the window refreshes the board. If the connection is stale, the header shows an offline / last-updated warning instead of the live clock. Click a row to open that job (`/#/job/<agent>/<job_id>`). The bot name in the job details opens that bot's jobs and timeline (`/#/agent/<name>`). Press `T`, or the top-bar button, to toggle day and night.
 
+`./statuspan post` posts to the relay when `STATUSPAN_RELAY_URL`, `STATUSPAN_RELAY_WORKSPACE`, and `STATUSPAN_TOKEN_FILE` are set, and to the local daemon otherwise.
+
 ```bash
-curl -s -X POST localhost:4477/api/jobs -H 'Content-Type: application/json' -d '{"agent":"MyBot","job_id":"build-1","title":"Build v1","state":"running","progress":40,"link":"https://example.com","seq":1,"ttl":600}'
-curl -s -X POST localhost:4477/api/jobs -H 'Content-Type: application/json' -d '{"agent":"MyBot","job_id":"build-1","progress":80,"note":"almost there"}'
 ./statuspan post --agent MyBot --job build-1 --state running --title "Build v1" --progress 40
 ./statuspan post --agent MyBot --job build-1 --progress 55 --note halfway
 curl -s 'localhost:4477/api/events?agent=MyBot'
@@ -52,6 +52,13 @@ curl -N localhost:4477/api/stream
 ./statuspan ls
 ./statuspan clear --yes
 ./statuspan clear --yes --section done
+```
+
+As a backup, you can always use the URL with plain curl, as long as the URL is the one where StatusPan is actually running.
+
+```bash
+curl -s -X POST "${STATUSPAN_URL:-http://127.0.0.1:4477/api/jobs}" -H 'Content-Type: application/json' -d '{"agent":"MyBot","job_id":"build-1","title":"Build v1","state":"running","progress":40,"link":"https://example.com","seq":1,"ttl":600}'
+curl -s -X POST "${STATUSPAN_URL:-http://127.0.0.1:4477/api/jobs}" -H 'Content-Type: application/json' -d '{"agent":"MyBot","job_id":"build-1","progress":80,"note":"almost there"}'
 ```
 
 `statuspan clear --yes` deletes every job and its history through the local daemon (`--addr` / `STATUSPAN_ADDR`). `statuspan clear --yes --section done` (or `attention`, `progress`, `queued`) deletes only that section. Without `--yes` it changes nothing. An unknown `--section` is an error and does not call the daemon.
@@ -79,6 +86,7 @@ The plist listens on `127.0.0.1:4477` and writes `~/Library/Logs/statuspan.log`.
 `statuspan run` wraps a command and reports it. Posts before the command finishes are fire-and-forget. If StatusPan is unreachable, the command still runs and StatusPan exits with that command's status. A down board is a warning on stderr only with `--verbose`. A relay or endpoint misconfiguration prints one warning, skips posting, and still runs the command. The final post is sent with a short timeout before StatusPan exits. The token is not printed.
 
 ```bash
+# example: wrap any command
 statuspan run --agent "My Agent" --job build-1 --title "Build v1" -- make test
 ```
 
