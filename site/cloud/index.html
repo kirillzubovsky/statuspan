@@ -52,8 +52,6 @@ a:hover{text-decoration:underline}
 .logo:hover{color:var(--text);text-decoration:none}
 .logo b{width:20px;height:20px;border-radius:6px;background:var(--accent);display:inline-flex;align-items:center;justify-content:center;flex:none}
 .logo b::after{content:"";width:8px;height:8px;border-radius:50%;border:2px solid var(--surf)}
-.live{display:inline-flex;align-items:center;gap:6px;color:var(--text2);font-size:12px}
-.live::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--done);box-shadow:0 0 0 3px var(--done-bg);flex:none}
 .btn{display:inline-flex;align-items:center;height:28px;padding:0 10px;border:1px solid var(--border2);border-radius:6px;background:var(--surf);color:var(--text);box-shadow:var(--shadow)}
 .btn:hover{background:var(--surf2);text-decoration:none}
 button.btn{font:inherit;cursor:pointer;appearance:none;-webkit-appearance:none}
@@ -63,7 +61,7 @@ button.btn:disabled{opacity:.6;cursor:default;filter:none}
 .top{min-height:50px;display:flex;align-items:center;border-bottom:1px solid var(--border);background:var(--surf);position:sticky;top:0;z-index:4}
 .top .inner,.wrap{max-width:1120px;margin:0 auto;padding:0 20px}
 .top .inner{width:100%;min-height:50px;display:flex;align-items:center;gap:14px}
-.top .live{margin-left:auto}
+.top nav{margin-left:auto;display:flex;align-items:center;gap:14px;flex-wrap:wrap;justify-content:flex-end}
 .top .cloud{color:var(--text2)}
 .top .cloud:hover{color:var(--text);text-decoration:none}
 .top .cloud[aria-current="page"]{color:var(--text)}
@@ -100,8 +98,7 @@ button.btn:disabled{opacity:.6;cursor:default;filter:none}
  .brow{grid-template-columns:1fr;gap:4px;align-items:start}
  .brow-h{display:none}
  .b-status{text-align:left}
- .top .live{display:none}
- .top .cloud{margin-left:auto}
+ .top nav{gap:10px}
 }
 </style>
 </head>
@@ -110,9 +107,11 @@ button.btn:disabled{opacity:.6;cursor:default;filter:none}
 <header class="top">
  <div class="inner">
   <a class="logo" href="/"><b></b>StatusPan</a>
-  <a class="cloud" href="/cloud" aria-current="page">Cloud</a>
-  <span class="live">Local board</span>
-  <a class="btn" href="https://github.com/kirillzubovsky/statuspan">GitHub</a>
+  <nav aria-label="Site">
+   <a class="cloud" href="/pricing">Pricing</a>
+   <a class="cloud" href="/cloud" aria-current="page">Hosted Relay</a>
+   <a class="btn" href="https://github.com/kirillzubovsky/statuspan">GitHub</a>
+  </nav>
  </div>
 </header>
 <main id="main">
@@ -120,7 +119,7 @@ button.btn:disabled{opacity:.6;cursor:default;filter:none}
   <section class="hero">
    <h1>StatusPan Cloud</h1>
    <p class="lede">A hosted relay so you don't have to run one yourself. See your board from any device. Join the waitlist and we'll email you when it's ready.</p>
-   <p class="lede">The <a href="/#start">open-source daemon</a>, the board, and the protocol stay free under the MIT license. Self-hosting the relay stays available. Pricing is planned at roughly $9–19 a month for teams, with a free tier for individuals. Final pricing will be announced when Cloud launches.</p>
+   <p class="lede">The <a href="/#start">open-source daemon</a>, the board, and the protocol stay free under the MIT license. <a href="/relay">Self-hosting the relay</a> stays free. StatusPan Cloud is $12 per user per month when it launches. <a href="/pricing">Pricing</a>.</p>
   </section>
 
   <section class="panel" aria-labelledby="included">
@@ -205,6 +204,8 @@ button.btn:disabled{opacity:.6;cursor:default;filter:none}
    <span class="logo"><b></b>StatusPan</span>
    <span>MIT</span>
    <a href="https://github.com/kirillzubovsky/statuspan">GitHub</a>
+   <a href="/pricing">Pricing</a>
+   <a href="/relay">Self-host the relay</a>
    <a href="/cloud">StatusPan Cloud — join the waitlist</a>
    <a href="https://kirillzubovsky.com">Made by Kirill Zubovsky</a>
   </footer>

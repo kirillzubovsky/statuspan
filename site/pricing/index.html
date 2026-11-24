@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="StatusPan self-hosting is free. StatusPan Cloud, the hosted relay, is $12 per user per month when it launches.">
+<meta name="robots" content="index, follow">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#1b1c20">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
+<title>Pricing — StatusPan</title>
+<link rel="canonical" href="https://statuspan.com/pricing">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="/site.webmanifest">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="StatusPan">
+<meta property="og:title" content="Pricing — StatusPan">
+<meta property="og:description" content="StatusPan self-hosting is free. StatusPan Cloud, the hosted relay, is $12 per user per month when it launches.">
+<meta property="og:url" content="https://statuspan.com/pricing">
+<meta property="og:image" content="https://statuspan.com/og-image.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="StatusPan night board showing which bot is working on what">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Pricing — StatusPan">
+<meta name="twitter:description" content="StatusPan self-hosting is free. StatusPan Cloud, the hosted relay, is $12 per user per month when it launches.">
+<meta name="twitter:image" content="https://statuspan.com/og-image.png">
+<meta name="twitter:image:alt" content="StatusPan night board showing which bot is working on what">
+<meta name="twitter:creator" content="@kirillzubovsky">
+<style>
+:root{
+ --bg:#1b1c20;--surf:#222329;--surf2:#2a2b32;--border:#2f3138;--border2:#3a3c44;
+ --text:#e4e5e9;--text2:#a7aab2;--text3:#969aa3;--accent:#8e96f2;--accent-bg:#2c2f4a;
+ --queued:#969aa3;--running:#72a3f5;--blocked:#b8a1f3;--done:#62c088;--failed:#f07f7f;--stalled:#f0a35c;--abandoned:#9aa0a8;
+ --running-bg:#24304a;--blocked-bg:#2f2a45;--done-bg:#203528;--failed-bg:#3d2527;--stalled-bg:#3d2e20;--queued-bg:#2c2d33;--abandoned-bg:#2c2d32;
+ --shadow:0 1px 2px rgba(0,0,0,.25);
+ color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{
+ background:var(--bg);color:var(--text);
+ font:13px/1.45 Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
+ -webkit-font-smoothing:antialiased;font-feature-settings:"cv11","ss01";
+}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.skip{position:absolute;left:12px;top:-40px;background:var(--surf);color:var(--text);padding:8px 12px;border-radius:6px;z-index:5}
+.skip:focus{top:12px}
+.logo{display:flex;align-items:center;gap:8px;font-weight:650;font-size:14px;letter-spacing:-.01em;color:var(--text)}
+.logo:hover{color:var(--text);text-decoration:none}
+.logo b{width:20px;height:20px;border-radius:6px;background:var(--accent);display:inline-flex;align-items:center;justify-content:center;flex:none}
+.logo b::after{content:"";width:8px;height:8px;border-radius:50%;border:2px solid var(--surf)}
+.btn{display:inline-flex;align-items:center;height:28px;padding:0 10px;border:1px solid var(--border2);border-radius:6px;background:var(--surf);color:var(--text);box-shadow:var(--shadow)}
+.btn:hover{background:var(--surf2);text-decoration:none}
+a.btn.primary{height:36px;padding:0 16px;background:var(--accent);color:#1b1c20;border-color:transparent;font-weight:650;font-size:14px}
+a.btn.primary:hover{background:var(--accent);filter:brightness(1.06);text-decoration:none}
+.top{min-height:50px;display:flex;align-items:center;border-bottom:1px solid var(--border);background:var(--surf);position:sticky;top:0;z-index:4}
+.top .inner,.wrap{max-width:1120px;margin:0 auto;padding:0 20px}
+.top .inner{width:100%;min-height:50px;display:flex;align-items:center;gap:14px}
+.top nav{margin-left:auto;display:flex;align-items:center;gap:14px;flex-wrap:wrap;justify-content:flex-end}
+.top .cloud{color:var(--text2)}
+.top .cloud:hover{color:var(--text);text-decoration:none}
+.top .cloud[aria-current="page"]{color:var(--text)}
+.hero{padding:36px 0 8px}
+.hero h1{margin:0;max-width:18ch;font-size:40px;line-height:1.08;font-weight:650;letter-spacing:-.03em}
+.lede{max-width:68ch;margin:14px 0 0;color:var(--text2);font-size:15px;line-height:1.5}
+.plans{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin:22px 0 8px}
+.plan{background:var(--surf);border:1px solid var(--border);border-radius:10px;padding:22px 22px 18px;display:flex;flex-direction:column}
+.kicker{margin:0;font-size:11.5px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--text3)}
+.price{margin:10px 0 0;font-size:36px;line-height:1;font-weight:650;letter-spacing:-.03em}
+.price span{font-size:15px;font-weight:550;letter-spacing:0;color:var(--text2)}
+.plan .note{margin:10px 0 0;color:var(--text2);font-size:14px;line-height:1.5}
+.plan ul{margin:14px 0 0;padding:0 0 0 18px;color:var(--text2);font-size:14px;line-height:1.55}
+.plan li{margin:0 0 6px}
+.plan .actions{margin-top:auto;padding-top:16px;display:flex;flex-wrap:wrap;gap:10px 16px;align-items:center}
+.foot{display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center;padding:22px 0 40px;color:var(--text3);font-size:12px}
+.foot a{color:var(--text2)}
+@media (max-width:720px){
+ .hero h1{font-size:32px}
+ .plans{grid-template-columns:1fr}
+ .top nav{gap:10px}
+}
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="top">
+ <div class="inner">
+  <a class="logo" href="/"><b></b>StatusPan</a>
+  <nav aria-label="Site">
+   <a class="cloud" href="/pricing" aria-current="page">Pricing</a>
+   <a class="cloud" href="/cloud">Hosted Relay</a>
+   <a class="btn" href="https://github.com/kirillzubovsky/statuspan">GitHub</a>
+  </nav>
+ </div>
+</header>
+<main id="main">
+ <div class="wrap">
+  <section class="hero">
+   <h1>Pricing</h1>
+   <p class="lede">Run StatusPan yourself for free, or let us run the relay.</p>
+  </section>
+
+  <section class="plans" aria-label="Offerings">
+   <article class="plan">
+    <p class="kicker">Self-hosted</p>
+    <p class="price">Free</p>
+    <p class="note">Unlimited. Open-source MIT daemon, board, and self-hosted relay. You run the local binary. If you want agents off this machine, you host the Cloudflare relay yourself.</p>
+    <div class="actions">
+     <a href="/#start">Install the local daemon</a>
+     <a href="/relay">Self-host the relay</a>
+    </div>
+   </article>
+   <article class="plan">
+    <p class="kicker">StatusPan Cloud</p>
+    <p class="price">$12<span>/user/month</span></p>
+    <p class="note">Launching soon. Hosted Relay: we run the relay for you.</p>
+    <ul>
+     <li>Hosted relay, with no Cloudflare setup</li>
+     <li>A shareable board link</li>
+     <li>View the board from your phone</li>
+     <li>Longer history</li>
+     <li>Team workspaces</li>
+    </ul>
+    <div class="actions">
+     <a class="btn primary" href="https://www.statuspan.com/cloud">Join the waitlist</a>
+    </div>
+   </article>
+  </section>
+
+  <p class="lede">Self-hosting the daemon and the relay stays free under the MIT license after StatusPan Cloud launches.</p>
+
+  <footer class="foot">
+   <span class="logo"><b></b>StatusPan</span>
+   <span>MIT</span>
+   <a href="https://github.com/kirillzubovsky/statuspan">GitHub</a>
+   <a href="/pricing">Pricing</a>
+   <a href="/relay">Self-host the relay</a>
+   <a href="/cloud">StatusPan Cloud — join the waitlist</a>
+   <a href="https://kirillzubovsky.com">Made by Kirill Zubovsky</a>
+  </footer>
+ </div>
+</main>
+</body>
+</html>

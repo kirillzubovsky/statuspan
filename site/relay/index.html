@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Self-host the StatusPan relay on Cloudflare. Mint a write token for agents and a read token for the local daemon. Hosted Relay is the no-setup option.">
+<meta name="robots" content="index, follow">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#1b1c20">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
+<title>Self-host the relay — StatusPan</title>
+<link rel="canonical" href="https://statuspan.com/relay">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="/site.webmanifest">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="StatusPan">
+<meta property="og:title" content="Self-host the relay — StatusPan">
+<meta property="og:description" content="Self-host the StatusPan relay on Cloudflare. Mint a write token for agents and a read token for the local daemon. Hosted Relay is the no-setup option.">
+<meta property="og:url" content="https://statuspan.com/relay">
+<meta property="og:image" content="https://statuspan.com/og-image.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="StatusPan night board showing which bot is working on what">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Self-host the relay — StatusPan">
+<meta name="twitter:description" content="Self-host the StatusPan relay on Cloudflare. Mint a write token for agents and a read token for the local daemon. Hosted Relay is the no-setup option.">
+<meta name="twitter:image" content="https://statuspan.com/og-image.png">
+<meta name="twitter:image:alt" content="StatusPan night board showing which bot is working on what">
+<meta name="twitter:creator" content="@kirillzubovsky">
+<style>
+:root{
+ --bg:#1b1c20;--surf:#222329;--surf2:#2a2b32;--border:#2f3138;--border2:#3a3c44;
+ --text:#e4e5e9;--text2:#a7aab2;--text3:#969aa3;--accent:#8e96f2;--accent-bg:#2c2f4a;
+ --queued:#969aa3;--running:#72a3f5;--blocked:#b8a1f3;--done:#62c088;--failed:#f07f7f;--stalled:#f0a35c;--abandoned:#9aa0a8;
+ --running-bg:#24304a;--blocked-bg:#2f2a45;--done-bg:#203528;--failed-bg:#3d2527;--stalled-bg:#3d2e20;--queued-bg:#2c2d33;--abandoned-bg:#2c2d32;
+ --shadow:0 1px 2px rgba(0,0,0,.25);
+ color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{
+ background:var(--bg);color:var(--text);
+ font:13px/1.45 Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
+ -webkit-font-smoothing:antialiased;font-feature-settings:"cv11","ss01";
+}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.mono{font-family:"SF Mono",ui-monospace,Menlo,"JetBrains Mono",monospace}
+.skip{position:absolute;left:12px;top:-40px;background:var(--surf);color:var(--text);padding:8px 12px;border-radius:6px;z-index:5}
+.skip:focus{top:12px}
+.logo{display:flex;align-items:center;gap:8px;font-weight:650;font-size:14px;letter-spacing:-.01em;color:var(--text)}
+.logo:hover{color:var(--text);text-decoration:none}
+.logo b{width:20px;height:20px;border-radius:6px;background:var(--accent);display:inline-flex;align-items:center;justify-content:center;flex:none}
+.logo b::after{content:"";width:8px;height:8px;border-radius:50%;border:2px solid var(--surf)}
+.btn{display:inline-flex;align-items:center;height:28px;padding:0 10px;border:1px solid var(--border2);border-radius:6px;background:var(--surf);color:var(--text);box-shadow:var(--shadow)}
+.btn:hover{background:var(--surf2);text-decoration:none}
+a.btn.primary{height:36px;padding:0 16px;background:var(--accent);color:#1b1c20;border-color:transparent;font-weight:650;font-size:14px}
+a.btn.primary:hover{background:var(--accent);filter:brightness(1.06);text-decoration:none}
+.top{min-height:50px;display:flex;align-items:center;border-bottom:1px solid var(--border);background:var(--surf);position:sticky;top:0;z-index:4}
+.top .inner,.wrap{max-width:1120px;margin:0 auto;padding:0 20px}
+.top .inner{width:100%;min-height:50px;display:flex;align-items:center;gap:14px}
+.top nav{margin-left:auto;display:flex;align-items:center;gap:14px;flex-wrap:wrap;justify-content:flex-end}
+.top .cloud{color:var(--text2)}
+.top .cloud:hover{color:var(--text);text-decoration:none}
+.top .cloud[aria-current="page"]{color:var(--text)}
+.sh{display:flex;align-items:center;gap:8px;height:40px;margin:0;padding:0 20px;font-size:11.5px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--text3);background:color-mix(in srgb,var(--surf2) 70%,var(--bg));border-bottom:1px solid var(--border)}
+.panel{background:var(--surf);border-top:1px solid var(--border);border-bottom:1px solid var(--border);margin:18px 0}
+.hero{padding:36px 0 8px}
+.hero h1{margin:0;max-width:18ch;font-size:40px;line-height:1.08;font-weight:650;letter-spacing:-.03em}
+.lede{max-width:68ch;margin:14px 0 0;color:var(--text2);font-size:15px;line-height:1.5}
+.brow{display:grid;grid-template-columns:168px minmax(0,1fr) 132px;align-items:center;column-gap:16px;min-height:48px;padding:10px 20px;border-bottom:1px solid var(--border);font-size:14px}
+.brow:last-child{border-bottom:0}
+.brow-h{min-height:32px;font-size:11.5px;font-weight:600;color:var(--text3);padding-top:0;padding-bottom:0}
+.b-title{font-weight:600}
+.b-detail{color:var(--text2);min-width:0;overflow-wrap:anywhere}
+.b-status{text-align:right}
+.word{font-size:12px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;white-space:nowrap}
+.word.running{color:var(--running)}.word.done{color:var(--done)}.word.blocked{color:var(--blocked)}.word.queued{color:var(--queued)}
+.steps{list-style:none;margin:0;padding:0}
+.steps li{display:grid;grid-template-columns:72px minmax(0,1fr);gap:16px;align-items:start;padding:16px 20px;border-bottom:1px solid var(--border)}
+.steps li:last-child{border-bottom:0}
+.steps .n{font-size:12px;font-weight:700;letter-spacing:.12em;color:var(--text3);padding-top:2px}
+.steps b{display:block;font-size:14px;font-weight:600}
+.steps p{margin:6px 0 0;color:var(--text2)}
+pre{margin:8px 0 0;padding:10px 12px;background:var(--bg);border:1px solid var(--border);border-radius:8px;overflow-x:auto;white-space:pre-wrap;overflow-wrap:break-word;font-family:"SF Mono",ui-monospace,Menlo,"JetBrains Mono",monospace;font-size:12.5px;line-height:1.55;color:var(--text)}
+code{font:inherit}
+.note{margin:0;padding:12px 20px 16px;color:var(--text2);font-size:14px;line-height:1.5}
+.note p{margin:0 0 10px}
+.note p:last-child{margin:0}
+.foot{display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center;padding:22px 0 40px;color:var(--text3);font-size:12px}
+.foot a{color:var(--text2)}
+@media (max-width:720px){
+ .hero h1{font-size:32px}
+ .brow,.steps li{grid-template-columns:1fr;gap:4px;align-items:start}
+ .brow-h{display:none}
+ .b-status{text-align:left}
+ .top nav{gap:10px}
+}
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="top">
+ <div class="inner">
+  <a class="logo" href="/"><b></b>StatusPan</a>
+  <nav aria-label="Site">
+   <a class="cloud" href="/pricing">Pricing</a>
+   <a class="cloud" href="/cloud">Hosted Relay</a>
+   <a class="btn" href="https://github.com/kirillzubovsky/statuspan">GitHub</a>
+  </nav>
+ </div>
+</header>
+<main id="main">
+ <div class="wrap">
+  <section class="hero">
+   <h1>Self-host the relay</h1>
+   <p class="lede">The relay is a Cloudflare Worker. Off-machine agents post jobs there, and your local daemon pulls them onto the board. A free Cloudflare account and Node.js are enough. If you do not want to run Cloudflare yourself, <a href="/cloud">Hosted Relay</a> is the no-setup option.</p>
+  </section>
+
+  <section class="panel" aria-labelledby="remote">
+   <h2 class="sh" id="remote">Agents that are not on this machine</h2>
+   <div class="note">
+    <p>Cloud and remote agents, for example Cursor cloud agents, CI, and other servers, cannot reach <span class="mono">127.0.0.1</span> on your machine. They must post to a relay with a write token stored as a secret. Your local daemon pulls those jobs in.</p>
+   </div>
+  </section>
+
+  <section class="panel" aria-labelledby="steps">
+   <h2 class="sh" id="steps">Set it up</h2>
+   <ol class="steps">
+    <li>
+     <span class="n">01</span>
+     <div>
+      <b>Deploy the Worker</b>
+      <p>From a free Cloudflare account, with Node.js installed:</p>
+      <pre><code>cd relay
+npm install
+npx wrangler login
+npx wrangler deploy</code></pre>
+      <p><span class="mono">wrangler deploy</span> prints the <span class="mono">workers.dev</span> URL.</p>
+     </div>
+    </li>
+    <li>
+     <span class="n">02</span>
+     <div>
+      <b>Set the admin secret</b>
+      <p>Never commit it.</p>
+      <pre><code>openssl rand -hex 32 &gt; admin-token
+npx wrangler secret put ADMIN_TOKEN &lt; admin-token
+chmod 600 admin-token</code></pre>
+     </div>
+    </li>
+    <li>
+     <span class="n">03</span>
+     <div>
+      <b>Create a workspace and tokens</b>
+      <p><span class="mono">RELAY_URL</span> is the <span class="mono">workers.dev</span> URL from deploy.</p>
+      <pre><code>export RELAY_URL=https://statuspan-relay.&lt;account&gt;.workers.dev
+export ADMIN_TOKEN=$(cat admin-token)
+node scripts/admin.mjs create-workspace home
+node scripts/admin.mjs mint home --kind write --agent MyBot --label laptop --out write-token
+node scripts/admin.mjs mint home --kind read --label board --out read-token
+chmod 600 write-token read-token</code></pre>
+     </div>
+    </li>
+    <li>
+     <span class="n">04</span>
+     <div>
+      <b>Point the daemon at the relay</b>
+      <p>Put <span class="mono">relay.json</span> in the data directory. On macOS that is <span class="mono">~/Library/Application Support/statuspan/relay.json</span>.</p>
+      <pre><code>{"url":"https://statuspan-relay.&lt;account&gt;.workers.dev","workspace":"home","read_token":"&lt;paste the read token&gt;"}</code></pre>
+      <p><span class="mono">chmod 600</span> that file and restart the daemon. It polls about every 3 seconds. Alternative environment variables: <span class="mono">STATUSPAN_RELAY_URL</span>, <span class="mono">STATUSPAN_RELAY_WORKSPACE</span>, and <span class="mono">STATUSPAN_RELAY_READ_TOKEN</span>.</p>
+     </div>
+    </li>
+    <li>
+     <span class="n">05</span>
+     <div>
+      <b>Have agents post</b>
+      <p>Set <span class="mono">STATUSPAN_RELAY_URL</span>, <span class="mono">STATUSPAN_RELAY_WORKSPACE</span>, and <span class="mono">STATUSPAN_TOKEN_FILE</span> (or <span class="mono">STATUSPAN_TOKEN</span> as a secret). Then <span class="mono">statuspan post</span> or <span class="mono">statuspan run</span>, or curl with <span class="mono">Authorization: Bearer</span>.</p>
+      <pre><code>curl -s -X POST "$RELAY_URL/v1/w/home/jobs" \
+  -H "Authorization: Bearer $(cat write-token)" \
+  -H 'Content-Type: application/json' \
+  -d '{"agent":"MyBot","job_id":"build-1","state":"running","progress":40}'</code></pre>
+     </div>
+    </li>
+   </ol>
+  </section>
+
+  <section class="panel" aria-labelledby="tokens">
+   <h2 class="sh" id="tokens">Token roles</h2>
+   <div class="brow brow-h" aria-hidden="true"><span>Token</span><span>What it can do</span><span>Role</span></div>
+   <div class="brow">
+    <span class="b-title">Write token</span>
+    <span class="b-detail">Belongs to one agent. Post-only. It cannot read the board.</span>
+    <span class="b-status word running">Post</span>
+   </div>
+   <div class="brow">
+    <span class="b-title">Read token</span>
+    <span class="b-detail">Feeds the board (list, poll, and stream). It cannot post.</span>
+    <span class="b-status word done">Board</span>
+   </div>
+   <div class="brow">
+    <span class="b-title">Admin token</span>
+    <span class="b-detail">Creates workspaces and mints, lists, and revokes tokens. Never give it to bots.</span>
+    <span class="b-status word blocked">Admin</span>
+   </div>
+  </section>
+
+  <section class="panel" aria-labelledby="hosted">
+   <h2 class="sh" id="hosted">No Cloudflare setup</h2>
+   <div class="note">
+    <p><a href="/cloud">Hosted Relay</a> runs the relay for you. It is launching soon at $12 per user per month. Self-host stays free.</p>
+    <p><a class="btn primary" href="https://www.statuspan.com/cloud">Join the waitlist</a></p>
+   </div>
+  </section>
+
+  <footer class="foot">
+   <span class="logo"><b></b>StatusPan</span>
+   <span>MIT</span>
+   <a href="https://github.com/kirillzubovsky/statuspan">GitHub</a>
+   <a href="/pricing">Pricing</a>
+   <a href="/relay">Self-host the relay</a>
+   <a href="/cloud">StatusPan Cloud — join the waitlist</a>
+   <a href="https://kirillzubovsky.com">Made by Kirill Zubovsky</a>
+  </footer>
+ </div>
+</main>
+</body>
+</html>

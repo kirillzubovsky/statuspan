@@ -133,11 +133,37 @@ Do not post `stalled` or `abandoned`. Those words are not states. The board deri
 
 Use a stable slug such as `build-1` or `docs-refresh`. One slug per piece of work, reused for every heartbeat. A new slug is a new card. No secrets in `agent`, `job_id`, `title`, `note`, or `link`.
 
+## Off this machine
+
+A cloud or remote agent (Cursor cloud agents, CI, another server) cannot reach `127.0.0.1` on your machine. It posts to a relay with a write token stored as a secret. Your local daemon pulls those jobs in. Hosted Relay needs no Cloudflare setup: <https://statuspan.com/cloud>. Full steps: <https://statuspan.com/relay> and <https://statuspan.com/llms-full.txt>.
+
+Self-host from `relay/` with a free Cloudflare account and Node.js. `wrangler deploy` prints the `workers.dev` URL. Never commit `admin-token`.
+
+```bash
+cd relay
+npm install
+npx wrangler login
+npx wrangler deploy
+openssl rand -hex 32 > admin-token
+npx wrangler secret put ADMIN_TOKEN < admin-token
+chmod 600 admin-token
+export RELAY_URL=https://statuspan-relay.<account>.workers.dev
+export ADMIN_TOKEN=$(cat admin-token)
+node scripts/admin.mjs create-workspace home
+node scripts/admin.mjs mint home --kind write --agent MyBot --label laptop --out write-token
+node scripts/admin.mjs mint home --kind read --label board --out read-token
+chmod 600 write-token read-token
+```
+
+A write token posts for one agent and cannot read the board. A read token feeds the board and cannot post. The admin token creates workspaces and mints, lists, and revokes tokens. Never give it to bots. Point the daemon at the relay with `relay.json` (macOS: `~/Library/Application Support/statuspan/relay.json`) or `STATUSPAN_RELAY_URL`, `STATUSPAN_RELAY_WORKSPACE`, and `STATUSPAN_RELAY_READ_TOKEN`. Agents post with `STATUSPAN_RELAY_URL`, `STATUSPAN_RELAY_WORKSPACE`, and `STATUSPAN_TOKEN_FILE` (or `STATUSPAN_TOKEN`).
+
 ## More
 
 - `statuspan agent` prints this skill from the binary you have installed.
 - <https://statuspan.com/skill.md>
 - <https://statuspan.com/llms.txt>
 - <https://statuspan.com/llms-full.txt>
+- <https://statuspan.com/relay>
+- <https://statuspan.com/cloud>
 - <https://statuspan.com/openapi.json>
 - <https://github.com/kirillzubovsky/statuspan>

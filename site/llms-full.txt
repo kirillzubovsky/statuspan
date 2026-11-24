@@ -398,13 +398,28 @@ A delete is a `job` event with `"deleted": true` and a one-item history of `kind
 
 ## Self-hosted relay
 
-`relay/` is a Cloudflare Worker with one SQLite Durable Object per workspace. You deploy it yourself. The marketing site does not host your jobs.
+`relay/` is a Cloudflare Worker with one SQLite Durable Object per workspace. You deploy it yourself. The marketing site does not host your jobs. The same steps are on https://statuspan.com/relay. If you do not want to run Cloudflare yourself, Hosted Relay is the no-setup option: https://statuspan.com/cloud.
+
+Cloud and remote agents (for example Cursor cloud agents, CI, and other servers) cannot reach `127.0.0.1` on your machine. They must post to a relay with a write token stored as a secret. The local daemon pulls those jobs in.
+
+A free Cloudflare account and Node.js are enough.
+
+### 1. Deploy
 
 ```bash
 cd relay
 npm install
 npx wrangler login
 npx wrangler deploy
+```
+
+`wrangler deploy` prints the `workers.dev` URL.
+
+### 2. Admin secret
+
+Never commit it.
+
+```bash
 openssl rand -hex 32 > admin-token
 npx wrangler secret put ADMIN_TOKEN < admin-token
 chmod 600 admin-token
@@ -412,8 +427,12 @@ chmod 600 admin-token
 
 `ADMIN_TOKEN` is the Worker secret. Bots do not send it. It creates workspaces and mints, lists, and revokes tokens.
 
+### 3. Workspace and tokens
+
+`RELAY_URL` is the `workers.dev` URL from deploy.
+
 ```bash
-export RELAY_URL=https://relay.example.com
+export RELAY_URL=https://statuspan-relay.<account>.workers.dev
 export ADMIN_TOKEN=$(cat admin-token)
 node scripts/admin.mjs create-workspace home
 node scripts/admin.mjs mint home --kind write --agent MyBot --label laptop --out write-token
@@ -422,6 +441,26 @@ chmod 600 write-token read-token
 ```
 
 `--out` writes only the token (mode 0600) and prints `saved to <path>`. `list` prints token ids, kinds, agents, and labels, not the secrets. `revoke` takes the token id.
+
+- A write token belongs to one agent. It is post-only and cannot read the board.
+- A read token feeds the board (list, poll, and stream) and cannot post.
+- The admin token creates workspaces and mints, lists, and revokes tokens. Never give it to bots.
+
+### 4. Point the daemon at the relay
+
+`relay.json` goes in the data directory. On macOS that is `~/Library/Application Support/statuspan/relay.json`.
+
+```json
+{"url":"https://statuspan-relay.<account>.workers.dev","workspace":"home","read_token":"<paste the read token>"}
+```
+
+`chmod 600` that file and restart the daemon. On start, and about every 3 seconds after that, it polls the workspace and merges events into the local board. Alternative environment variables, which win over the file: `STATUSPAN_RELAY_URL`, `STATUSPAN_RELAY_WORKSPACE`, and `STATUSPAN_RELAY_READ_TOKEN`. Flags win over both. If the URL, workspace, or read token is set and another of the three is missing, serve exits instead of going local.
+
+### 5. Agents post
+
+Set `STATUSPAN_RELAY_URL`, `STATUSPAN_RELAY_WORKSPACE`, and `STATUSPAN_TOKEN_FILE` (or `STATUSPAN_TOKEN` as a secret). Then `statuspan post` or `statuspan run`, or curl with `Authorization: Bearer`. Store the write token as a secret. A remote agent cannot fall back to `127.0.0.1`.
+
+The rest of this section is the relay HTTP API.
 
 Workspace names match `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`.
 
@@ -514,9 +553,9 @@ Authorization: Bearer {read token}
 
 It merges each `update` with `ApplyAt` so the event's own timestamp is kept, using the same seq rules as a local post. The cursor is saved in `relay-cursor` in the data directory. A repeated cursor is a no-op. Failures back off, with jitter, from 1 second, doubling, up to about 60 seconds. Errors are logged without the token. Merged jobs go out on the local SSE stream.
 
-Point `statuspan serve` at the relay with the flags above, or with `relay.json`. Restart after changing the file.
+Point `statuspan serve` at the relay with the flags above, or with `relay.json` in the data directory (macOS: `~/Library/Application Support/statuspan/relay.json`). `chmod 600` that file. Restart after changing it. Alternative environment: `STATUSPAN_RELAY_URL`, `STATUSPAN_RELAY_WORKSPACE`, and `STATUSPAN_RELAY_READ_TOKEN`.
 
-Post from an agent that is not on this machine:
+Post from an agent that is not on this machine. It cannot use `127.0.0.1`. Store the write token as a secret (`STATUSPAN_TOKEN` or `STATUSPAN_TOKEN_FILE`) together with `STATUSPAN_RELAY_URL` and `STATUSPAN_RELAY_WORKSPACE`:
 
 ```bash
 curl --max-time 2 -s -X POST "$RELAY_URL/v1/w/home/jobs" \

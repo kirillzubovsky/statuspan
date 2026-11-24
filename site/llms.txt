@@ -42,9 +42,47 @@ curl -s -X POST "${STATUSPAN_URL:-http://127.0.0.1:4477/api/jobs}" -H 'Content-T
 - `STATUSPAN_AGENT` is the default for `run --agent`. `STATUSPAN_URL` is the full local jobs endpoint for `post` and `run` (for example `http://127.0.0.1:14477/api/jobs`). `STATUSPAN_TOKEN_FILE` is a file containing the relay write token, used when `STATUSPAN_TOKEN` is unset.
 - The same recurring rule applies to the CLI: healthy routines stay off the board. Push `blocked` or `failed` when a routine needs a person or has failed, then push `done` once it is resolved.
 
+## Self-host the relay
+
+Cloud and remote agents (Cursor cloud agents, CI, other servers) cannot reach `127.0.0.1` on your machine. They post to a relay with a write token stored as a secret. The local daemon pulls those jobs in. If you do not want to run Cloudflare yourself, use Hosted Relay: https://statuspan.com/cloud.
+
+A free Cloudflare account and Node.js are enough. From `relay/`:
+
+```bash
+cd relay
+npm install
+npx wrangler login
+npx wrangler deploy
+openssl rand -hex 32 > admin-token
+npx wrangler secret put ADMIN_TOKEN < admin-token
+chmod 600 admin-token
+export RELAY_URL=https://statuspan-relay.<account>.workers.dev
+export ADMIN_TOKEN=$(cat admin-token)
+node scripts/admin.mjs create-workspace home
+node scripts/admin.mjs mint home --kind write --agent MyBot --label laptop --out write-token
+node scripts/admin.mjs mint home --kind read --label board --out read-token
+chmod 600 write-token read-token
+```
+
+`wrangler deploy` prints the `workers.dev` URL. Never commit `admin-token`. A write token posts for one agent and cannot read the board. A read token feeds the board and cannot post. The admin token creates workspaces and mints, lists, and revokes tokens. Never give it to bots.
+
+Point the daemon at the relay with `relay.json` in the data directory (macOS: `~/Library/Application Support/statuspan/relay.json`):
+
+```json
+{"url":"https://statuspan-relay.<account>.workers.dev","workspace":"home","read_token":"<paste the read token>"}
+```
+
+`chmod 600` that file and restart the daemon. It polls about every 3 seconds. Alternative env: `STATUSPAN_RELAY_URL`, `STATUSPAN_RELAY_WORKSPACE`, and `STATUSPAN_RELAY_READ_TOKEN`.
+
+Agents post with `STATUSPAN_RELAY_URL`, `STATUSPAN_RELAY_WORKSPACE`, and `STATUSPAN_TOKEN_FILE` (or `STATUSPAN_TOKEN` as a secret), then `statuspan post` or `statuspan run`, or curl with `Authorization: Bearer`.
+
+Full steps: https://statuspan.com/relay and https://statuspan.com/llms-full.txt.
+
 ## Specs
 
 - [Full reference](https://statuspan.com/llms-full.txt): CLI, HTTP API, relay, and copy-paste clients
+- [Self-host the relay](https://statuspan.com/relay): Cloudflare Worker setup, tokens, and `relay.json`
+- [Hosted Relay](https://statuspan.com/cloud): no-setup relay, waitlist
 - [Agent skill](https://statuspan.com/skill.md): drop-in instructions for a coding agent
 - [OpenAPI](https://statuspan.com/openapi.json): local daemon and self-hosted relay
 - [Job update schema](https://statuspan.com/schema/job-update.schema.json): JSON Schema for one update or a batch
