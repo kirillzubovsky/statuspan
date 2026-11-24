@@ -111,16 +111,16 @@
       "delete": {
         "tags": ["daemon"],
         "operationId": "daemonClearJobs",
-        "summary": "Delete every job",
+        "summary": "Delete every job, or one board section",
         "servers": [{"url": "http://127.0.0.1:4477"}],
-        "description": "Requires confirm=all. If the confirm query is present, the body is ignored. Any other confirmation is 400 and changes nothing. The log is copied to jobs-backup-<unix>.jsonl first.",
+        "description": "confirm=all deletes every job and copies the log to jobs-backup-<unix>.jsonl first. confirm=attention, progress, queued, or done deletes only that section by appending a delete tombstone per job. The rest of the log stays, and there is no backup. Sections match the board: attention is failed, blocked, stalled, and abandoned (including an abandoned queued or blocked job); progress is a healthy running job; queued is queued and not abandoned; done is done. If the confirm query is present, the body is ignored. Any other confirmation is 400 and changes nothing. Invalid JSON is 400 invalid json.",
         "parameters": [
           {
             "name": "confirm",
             "in": "query",
             "required": false,
-            "schema": {"type": "string", "const": "all"},
-            "description": "Must be all. When this query key is present, the body is not read."
+            "schema": {"type": "string", "enum": ["all", "attention", "progress", "queued", "done"]},
+            "description": "all wipes the board. A section name deletes only that section. When this query key is present, the body is not read."
           }
         ],
         "requestBody": {
@@ -130,15 +130,18 @@
               "schema": {
                 "type": "object",
                 "required": ["confirm"],
-                "properties": {"confirm": {"type": "string", "const": "all"}}
+                "properties": {"confirm": {"type": "string", "enum": ["all", "attention", "progress", "queued", "done"]}}
               },
-              "example": {"confirm": "all"}
+              "examples": {
+                "all": {"value": {"confirm": "all"}},
+                "done": {"value": {"confirm": "done"}}
+              }
             }
           }
         },
         "responses": {
           "200": {
-            "description": "Board cleared.",
+            "description": "Jobs removed. confirm=all includes backup. A section clear includes section and no backup.",
             "content": {
               "application/json": {
                 "schema": {"$ref": "#/components/schemas/ClearResult"}
@@ -146,7 +149,7 @@
             }
           },
           "400": {
-            "description": "confirm must be \"all\", or invalid json.",
+            "description": "confirm must be \"all\", \"attention\", \"progress\", \"queued\", or \"done\", or invalid json.",
             "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}
           },
           "500": {"$ref": "#/components/responses/Error"}
@@ -729,13 +732,30 @@
         }
       },
       "ClearResult": {
-        "type": "object",
-        "required": ["ok", "deleted", "backup"],
-        "properties": {
-          "ok": {"type": "boolean", "const": true},
-          "deleted": {"type": "integer", "minimum": 0},
-          "backup": {"type": "string", "description": "Absolute path of jobs-backup-<unix>.jsonl."}
-        }
+        "oneOf": [
+          {
+            "title": "ClearAllResult",
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["ok", "deleted", "backup"],
+            "properties": {
+              "ok": {"type": "boolean", "const": true},
+              "deleted": {"type": "integer", "minimum": 0},
+              "backup": {"type": "string", "description": "Absolute path of jobs-backup-<unix>.jsonl. Required for confirm=all."}
+            }
+          },
+          {
+            "title": "ClearSectionResult",
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["ok", "deleted", "section"],
+            "properties": {
+              "ok": {"type": "boolean", "const": true},
+              "deleted": {"type": "integer", "minimum": 0},
+              "section": {"type": "string", "enum": ["attention", "progress", "queued", "done"], "description": "Section that was cleared. Present for a section clear, absent for confirm=all."}
+            }
+          }
+        ]
       },
       "Error": {
         "type": "object",

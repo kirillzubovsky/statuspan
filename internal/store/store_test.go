@@ -1196,6 +1196,397 @@ func TestClearBacksUpAndReplaysEmpty(t *testing.T) {
 	}
 }
 
+func TestBoardSection(t *testing.T) {
+	cases := []struct {
+		name string
+		v    JobView
+		want string
+	}{
+		{"failed", JobView{State: "failed"}, "attention"},
+		{"blocked", JobView{State: "blocked"}, "attention"},
+		{"stalled running", JobView{State: "running", Stalled: true}, "attention"},
+		{"abandoned running", JobView{State: "running", Abandoned: true}, "attention"},
+		{"abandoned queued", JobView{State: "queued", Abandoned: true}, "attention"},
+		{"abandoned blocked", JobView{State: "blocked", Abandoned: true}, "attention"},
+		{"healthy running", JobView{State: "running"}, "progress"},
+		{"queued", JobView{State: "queued"}, "queued"},
+		{"done", JobView{State: "done"}, "done"},
+		{"done ignores abandoned flag", JobView{State: "done", Abandoned: true}, "done"},
+		{"failed ignores stalled flag", JobView{State: "failed", Stalled: true}, "attention"},
+		{"empty", JobView{}, ""},
+	}
+	for _, tc := range cases {
+		if got := BoardSection(tc.v); got != tc.want {
+			t.Fatalf("%s: %q want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
+func seedClearBoard(t *testing.T) (*Store, string) {
+	t.Helper()
+	dir := t.TempDir()
+	start := time.Date(2026, 11, 1, 12, 0, 0, 0, time.UTC)
+	after := 20 * time.Minute
+	waiting := 30 * time.Minute
+	s, now := openAbandon(t, dir, start, &after, &waiting)
+	early := []Update{
+		{Agent: "bot", JobID: "abandon-run", State: "running", TTL: intPtr(10), Title: strPtr("Abandon run")},
+		{Agent: "bot", JobID: "abandon-q", State: "queued", Title: strPtr("Abandon queue")},
+		{Agent: "bot", JobID: "block-old", State: "blocked", Title: strPtr("Old block")},
+		{Agent: "bot", JobID: "fail", State: "failed", Title: strPtr("Fail")},
+		{Agent: "other", JobID: "done", State: "done", Title: strPtr("Done job"), Note: strPtr("shipped")},
+	}
+	for _, u := range early {
+		mustApply(t, s, u)
+	}
+	*now = start.Add(34 * time.Minute)
+	late := []Update{
+		{Agent: "bot", JobID: "stall", State: "running", TTL: intPtr(10), Title: strPtr("Stall")},
+		{Agent: "bot", JobID: "run", State: "running", TTL: intPtr(600), Title: strPtr("Running"), Note: strPtr("keep")},
+		{Agent: "bot", JobID: "queue", State: "queued", Title: strPtr("Queue")},
+		{Agent: "bot", JobID: "block", State: "blocked", Title: strPtr("Block")},
+	}
+	for _, u := range late {
+		mustApply(t, s, u)
+	}
+	*now = start.Add(35 * time.Minute)
+	want := map[string]string{
+		"abandon-run": "attention",
+		"abandon-q":   "attention",
+		"block-old":   "attention",
+		"fail":        "attention",
+		"stall":       "attention",
+		"block":       "attention",
+		"run":         "progress",
+		"queue":       "queued",
+		"done":        "done",
+	}
+	_, jobs := s.List()
+	if len(jobs) != len(want) {
+		t.Fatalf("seed jobs %d", len(jobs))
+	}
+	byID := map[string]JobView{}
+	for _, j := range jobs {
+		byID[j.JobID] = j
+		if got := BoardSection(j); got != want[j.JobID] {
+			t.Fatalf("%s section %q want %q stalled=%v abandoned=%v state=%s", j.JobID, got, want[j.JobID], j.Stalled, j.Abandoned, j.State)
+		}
+	}
+	if !byID["stall"].Stalled || byID["stall"].Abandoned {
+		t.Fatalf("stall %+v", byID["stall"])
+	}
+	if !byID["abandon-run"].Abandoned || byID["abandon-run"].Stalled || byID["abandon-run"].State != "running" {
+		t.Fatalf("abandon-run %+v", byID["abandon-run"])
+	}
+	if !byID["abandon-q"].Abandoned || byID["abandon-q"].State != "queued" {
+		t.Fatalf("abandon-q %+v", byID["abandon-q"])
+	}
+	if !byID["block-old"].Abandoned || byID["block-old"].State != "blocked" {
+		t.Fatalf("block-old %+v", byID["block-old"])
+	}
+	if byID["block"].Abandoned || byID["block"].State != "blocked" {
+		t.Fatalf("block %+v", byID["block"])
+	}
+	if byID["run"].Stalled || byID["run"].Abandoned || byID["run"].State != "running" {
+		t.Fatalf("run %+v", byID["run"])
+	}
+	if byID["queue"].Abandoned || byID["queue"].State != "queued" {
+		t.Fatalf("queue %+v", byID["queue"])
+	}
+	return s, dir
+}
+
+func assertJobIDs(t *testing.T, s *Store, want ...string) {
+	t.Helper()
+	_, jobs := s.List()
+	got := map[string]bool{}
+	for _, j := range jobs {
+		got[j.Agent+"/"+j.JobID] = true
+	}
+	if len(got) != len(want) {
+		t.Fatalf("jobs %v want %v", got, want)
+	}
+	for _, id := range want {
+		if !got[id] {
+			t.Fatalf("missing %s in %v", id, got)
+		}
+	}
+}
+
+func assertNoBackup(t *testing.T, dir string) {
+	t.Helper()
+	matches, err := filepath.Glob(filepath.Join(dir, "jobs-backup-*.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) != 0 {
+		t.Fatalf("backups %v", matches)
+	}
+}
+
+func TestClearSection(t *testing.T) {
+	allBut := func(drop string) []string {
+		ids := []string{
+			"bot/abandon-run", "bot/abandon-q", "bot/block-old", "bot/fail",
+			"bot/stall", "bot/block", "bot/run", "bot/queue", "other/done",
+		}
+		out := make([]string, 0, len(ids)-1)
+		for _, id := range ids {
+			if id != drop {
+				out = append(out, id)
+			}
+		}
+		return out
+	}
+	attentionKept := []string{"bot/run", "bot/queue", "other/done"}
+
+	t.Run("done", func(t *testing.T) {
+		s, dir := seedClearBoard(t)
+		before := countLines(t, dir)
+		n, err := s.ClearSection("done")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n != 1 {
+			t.Fatalf("deleted %d", n)
+		}
+		assertJobIDs(t, s, allBut("other/done")...)
+		job, ok := s.Get("bot", "run")
+		if !ok || job.Note != "keep" || job.Title != "Running" {
+			t.Fatalf("running %+v ok=%v", job, ok)
+		}
+		if _, ok := s.Get("other", "done"); ok {
+			t.Fatal("done job remained")
+		}
+		if countLines(t, dir) != before+1 {
+			t.Fatalf("log lines %d want %d", countLines(t, dir), before+1)
+		}
+		assertNoBackup(t, dir)
+		raw, err := os.ReadFile(filepath.Join(dir, logName))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(raw), "Running") || !strings.Contains(string(raw), `"kind":"delete"`) {
+			t.Fatalf("log %s", raw)
+		}
+	})
+
+	t.Run("attention", func(t *testing.T) {
+		s, dir := seedClearBoard(t)
+		n, err := s.ClearSection("attention")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n != 6 {
+			t.Fatalf("deleted %d", n)
+		}
+		assertJobIDs(t, s, attentionKept...)
+		assertNoBackup(t, dir)
+	})
+
+	t.Run("progress", func(t *testing.T) {
+		s, dir := seedClearBoard(t)
+		n, err := s.ClearSection("progress")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n != 1 {
+			t.Fatalf("deleted %d", n)
+		}
+		assertJobIDs(t, s, allBut("bot/run")...)
+		stall, _ := s.Get("bot", "stall")
+		abandoned, _ := s.Get("bot", "abandon-run")
+		if !stall.Stalled || stall.Abandoned || !abandoned.Abandoned || abandoned.State != "running" {
+			t.Fatalf("stall=%+v abandoned=%+v", stall, abandoned)
+		}
+		assertNoBackup(t, dir)
+	})
+
+	t.Run("queued", func(t *testing.T) {
+		s, dir := seedClearBoard(t)
+		n, err := s.ClearSection("queued")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n != 1 {
+			t.Fatalf("deleted %d", n)
+		}
+		assertJobIDs(t, s, allBut("bot/queue")...)
+		if job, ok := s.Get("bot", "abandon-q"); !ok || !job.Abandoned || job.State != "queued" {
+			t.Fatalf("abandoned queued %+v ok=%v", job, ok)
+		}
+		assertNoBackup(t, dir)
+	})
+
+	t.Run("invalid", func(t *testing.T) {
+		s, dir := seedClearBoard(t)
+		_, ch, cancel := s.Subscribe()
+		defer cancel()
+		before, err := os.ReadFile(filepath.Join(dir, logName))
+		if err != nil {
+			t.Fatal(err)
+		}
+		snap := dumpJobs(t, s)
+		n, err := s.ClearSection("all")
+		if n != 0 {
+			t.Fatalf("deleted %d", n)
+		}
+		if _, ok := err.(*ValidationError); !ok {
+			t.Fatalf("got %T %v", err, err)
+		}
+		if dumpJobs(t, s) != snap {
+			t.Fatal("invalid section changed the board")
+		}
+		after, err := os.ReadFile(filepath.Join(dir, logName))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(after) != string(before) {
+			t.Fatal("invalid section changed the log")
+		}
+		assertNoBackup(t, dir)
+		select {
+		case push := <-ch:
+			t.Fatalf("invalid section published %+v", push.Snapshot)
+		default:
+		}
+	})
+
+	t.Run("empty publishes nothing", func(t *testing.T) {
+		dir := t.TempDir()
+		cur := time.Date(2026, 11, 3, 9, 0, 0, 0, time.UTC)
+		s := openClock(t, dir, func() time.Time { return cur })
+		defer s.Close()
+		mustApply(t, s, Update{Agent: "bot", JobID: "run", State: "running", Title: strPtr("Running"), Note: strPtr("keep")})
+		_, ch, cancel := s.Subscribe()
+		defer cancel()
+		before, err := os.ReadFile(filepath.Join(dir, logName))
+		if err != nil {
+			t.Fatal(err)
+		}
+		n, err := s.ClearSection("done")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n != 0 {
+			t.Fatalf("deleted %d", n)
+		}
+		job, ok := s.Get("bot", "run")
+		if !ok || job.Note != "keep" {
+			t.Fatalf("%+v ok=%v", job, ok)
+		}
+		after, err := os.ReadFile(filepath.Join(dir, logName))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(after) != string(before) {
+			t.Fatal("empty section changed the log")
+		}
+		select {
+		case push := <-ch:
+			t.Fatalf("empty section published %+v", push.Snapshot)
+		case <-time.After(50 * time.Millisecond):
+		}
+	})
+
+	t.Run("replay and revive", func(t *testing.T) {
+		dir := t.TempDir()
+		cur := time.Date(2026, 11, 4, 9, 0, 0, 0, time.UTC)
+		s := openClock(t, dir, func() time.Time { return cur })
+		mustApply(t, s, Update{Agent: "bot", JobID: "run", State: "running", Title: strPtr("Stay"), Note: strPtr("history note"), Seq: i64Ptr(1)})
+		cur = cur.Add(time.Second)
+		mustApply(t, s, Update{Agent: "bot", JobID: "run", Progress: intPtr(40), Note: strPtr("still here")})
+		mustApply(t, s, Update{Agent: "bot", JobID: "ship", State: "done", Title: strPtr("Ship"), Note: strPtr("finished")})
+		n, err := s.ClearSection("done")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n != 1 {
+			t.Fatalf("deleted %d", n)
+		}
+		job, ok := s.Get("bot", "run")
+		if !ok || job.Title != "Stay" || job.Note != "still here" || job.Progress != 40 || len(job.History) != 2 {
+			t.Fatalf("kept %+v ok=%v", job, ok)
+		}
+		if _, ok := s.Get("bot", "ship"); ok {
+			t.Fatal("done job remained")
+		}
+		assertNoBackup(t, dir)
+		if err := s.Close(); err != nil {
+			t.Fatal(err)
+		}
+		s = openClock(t, dir, func() time.Time { return cur })
+		job, ok = s.Get("bot", "run")
+		if !ok || job.Title != "Stay" || job.Note != "still here" || job.Progress != 40 || len(job.History) != 2 {
+			t.Fatalf("replay kept %+v ok=%v", job, ok)
+		}
+		if _, ok := s.Get("bot", "ship"); ok {
+			t.Fatal("replay resurrected the cleared job")
+		}
+		_, evs := s.AgentEvents("bot")
+		if len(evs) < 2 || evs[0].Kind != "delete" || evs[0].JobID != "ship" {
+			t.Fatalf("agent events %+v", evs)
+		}
+		cur = cur.Add(time.Second)
+		if !mustApply(t, s, Update{Agent: "bot", JobID: "ship", State: "running", Title: strPtr("Back"), Seq: i64Ptr(1)}) {
+			t.Fatal("revive did not apply")
+		}
+		revived, ok := s.Get("bot", "ship")
+		if !ok || revived.Title != "Back" || revived.State != "running" {
+			t.Fatalf("revived %+v ok=%v", revived, ok)
+		}
+		if err := s.Close(); err != nil {
+			t.Fatal(err)
+		}
+		again := openClock(t, dir, func() time.Time { return cur })
+		defer again.Close()
+		revived, ok = again.Get("bot", "ship")
+		if !ok || revived.Title != "Back" || revived.State != "running" {
+			t.Fatalf("revived replay %+v ok=%v", revived, ok)
+		}
+		kept, ok := again.Get("bot", "run")
+		if !ok || kept.Note != "still here" || kept.Title != "Stay" {
+			t.Fatalf("kept replay %+v ok=%v", kept, ok)
+		}
+	})
+
+	t.Run("snapshot", func(t *testing.T) {
+		s, _ := seedClearBoard(t)
+		_, ch, cancel := s.Subscribe()
+		defer cancel()
+		n, err := s.ClearSection("done")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n != 1 {
+			t.Fatalf("deleted %d", n)
+		}
+		select {
+		case push := <-ch:
+			if push.Snapshot == nil {
+				t.Fatalf("want snapshot, got job %+v", push.Job)
+			}
+			if push.Job.JobID != "" || push.Job.Deleted {
+				t.Fatalf("snapshot push also carried a job %+v", push.Job)
+			}
+			ids := map[string]bool{}
+			for _, j := range push.Snapshot.Jobs {
+				ids[j.Agent+"/"+j.JobID] = true
+			}
+			if ids["other/done"] || !ids["bot/run"] || len(push.Snapshot.Jobs) != 8 {
+				t.Fatalf("snapshot jobs %v", ids)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("section clear did not publish a snapshot")
+		}
+		select {
+		case push := <-ch:
+			t.Fatalf("extra push snapshot=%v job=%+v", push.Snapshot != nil, push.Job)
+		default:
+		}
+	})
+}
+
 func itoa(n int) string {
 	if n == 0 {
 		return "0"

@@ -165,46 +165,54 @@ func (s *Server) handleDelete(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleClear(w http.ResponseWriter, r *http.Request) {
-	ok, err := confirmClear(r)
+	confirm, err := confirmClear(r)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid json")
 		return
 	}
-	if !ok {
-		writeErr(w, http.StatusBadRequest, `confirm must be "all"`)
-		return
+	switch confirm {
+	case "all":
+		n, backup, err := s.store.Clear()
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "deleted": n, "backup": backup})
+	case "attention", "progress", "queued", "done":
+		n, err := s.store.ClearSection(confirm)
+		if err != nil {
+			writeStoreErr(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "deleted": n, "section": confirm})
+	default:
+		writeErr(w, http.StatusBadRequest, `confirm must be "all", "attention", "progress", "queued", or "done"`)
 	}
-	n, backup, err := s.store.Clear()
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "deleted": n, "backup": backup})
 }
 
-func confirmClear(r *http.Request) (bool, error) {
+func confirmClear(r *http.Request) (string, error) {
 	if r.URL.Query().Has("confirm") {
-		return r.URL.Query().Get("confirm") == "all", nil
+		return r.URL.Query().Get("confirm"), nil
 	}
 	defer r.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(r.Body, maxBody+1))
 	if err != nil {
-		return false, err
+		return "", err
 	}
 	if len(body) > maxBody {
-		return false, fmt.Errorf("body too large")
+		return "", fmt.Errorf("body too large")
 	}
 	body = bytes.TrimSpace(body)
 	if len(body) == 0 {
-		return false, nil
+		return "", nil
 	}
 	var payload struct {
 		Confirm string `json:"confirm"`
 	}
 	if err := json.Unmarshal(body, &payload); err != nil {
-		return false, err
+		return "", err
 	}
-	return payload.Confirm == "all", nil
+	return payload.Confirm, nil
 }
 
 func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {

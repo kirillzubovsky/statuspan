@@ -629,9 +629,264 @@ func TestClearAllRequiresConfirmAndBacksUp(t *testing.T) {
 	}
 }
 
+func TestClearSectionHTTP(t *testing.T) {
+	dir := t.TempDir()
+	start := time.Date(2026, 11, 1, 12, 0, 0, 0, time.UTC)
+	cur := start
+	after := 20 * time.Minute
+	waiting := 30 * time.Minute
+	st, err := store.OpenWith(dir, store.Options{
+		Now:                 func() time.Time { return cur },
+		AbandonAfter:        &after,
+		AbandonWaitingAfter: &waiting,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	ts := httptest.NewServer(New(st).Handler())
+	t.Cleanup(ts.Close)
+
+	postOK := func(body string) {
+		t.Helper()
+		resp := postRaw(t, ts.URL, body)
+		if resp.StatusCode != 200 {
+			t.Fatalf("post %s: %d %s", body, resp.StatusCode, readBody(t, resp))
+		}
+	}
+	postOK(`{"agent":"bot","job_id":"abandon-run","state":"running","ttl":10,"title":"Abandon run"}`)
+	postOK(`{"agent":"bot","job_id":"abandon-q","state":"queued","title":"Abandon queue"}`)
+	postOK(`{"agent":"bot","job_id":"block-old","state":"blocked","title":"Old block"}`)
+	postOK(`{"agent":"bot","job_id":"fail","state":"failed","title":"Fail"}`)
+	postOK(`{"agent":"other","job_id":"done","state":"done","title":"Done job"}`)
+	cur = start.Add(34 * time.Minute)
+	postOK(`{"agent":"bot","job_id":"stall","state":"running","ttl":10,"title":"Stall"}`)
+	postOK(`{"agent":"bot","job_id":"run","state":"running","ttl":600,"title":"Running"}`)
+	postOK(`{"agent":"bot","job_id":"queue","state":"queued","title":"Queue"}`)
+	postOK(`{"agent":"bot","job_id":"block","state":"blocked","title":"Block"}`)
+	cur = start.Add(35 * time.Minute)
+
+	jobsByID := func() map[string]store.JobView {
+		t.Helper()
+		var list struct {
+			Jobs []store.JobView `json:"jobs"`
+		}
+		if err := json.Unmarshal([]byte(getJSON(t, ts.URL+"/api/jobs")), &list); err != nil {
+			t.Fatal(err)
+		}
+		out := make(map[string]store.JobView, len(list.Jobs))
+		for _, j := range list.Jobs {
+			out[j.JobID] = j
+		}
+		return out
+	}
+	assertIDs := func(want ...string) {
+		t.Helper()
+		got := jobsByID()
+		if len(got) != len(want) {
+			ids := make([]string, 0, len(got))
+			for id := range got {
+				ids = append(ids, id)
+			}
+			t.Fatalf("jobs %v want %v", ids, want)
+		}
+		for _, id := range want {
+			if _, ok := got[id]; !ok {
+				t.Fatalf("missing %s", id)
+			}
+		}
+	}
+	seed := jobsByID()
+	if !seed["stall"].Stalled || seed["stall"].Abandoned || seed["stall"].State != "running" {
+		t.Fatalf("stall %+v", seed["stall"])
+	}
+	if !seed["abandon-run"].Abandoned || seed["abandon-run"].Stalled {
+		t.Fatalf("abandon-run %+v", seed["abandon-run"])
+	}
+	if !seed["abandon-q"].Abandoned || seed["abandon-q"].State != "queued" {
+		t.Fatalf("abandon-q %+v", seed["abandon-q"])
+	}
+	if seed["run"].Stalled || seed["run"].Abandoned {
+		t.Fatalf("run %+v", seed["run"])
+	}
+
+	doDelete := func(rawURL, body string) (int, string) {
+		t.Helper()
+		req, err := http.NewRequest(http.MethodDelete, rawURL, strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if body != "" {
+			req.Header.Set("Content-Type", "application/json")
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		b, err := io.ReadAll(resp.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return resp.StatusCode, string(b)
+	}
+	type clearOut struct {
+		OK      bool    `json:"ok"`
+		Deleted int     `json:"deleted"`
+		Section string  `json:"section"`
+		Backup  *string `json:"backup"`
+		Error   string  `json:"error"`
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	streamReq, err := http.NewRequestWithContext(ctx, http.MethodGet, ts.URL+"/api/stream", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	streamResp, err := http.DefaultClient.Do(streamReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer streamResp.Body.Close()
+	reader := bufio.NewReader(streamResp.Body)
+	ev, data := readSSE(t, reader)
+	if ev != "snapshot" || !strings.Contains(data, "Done job") {
+		t.Fatalf("initial snapshot %s %s", ev, data)
+	}
+
+	code, body := doDelete(ts.URL+"/api/jobs", `{"confirm":"done"}`)
+	if code != 200 {
+		t.Fatalf("body done %d %s", code, body)
+	}
+	var doneOut clearOut
+	if err := json.Unmarshal([]byte(body), &doneOut); err != nil {
+		t.Fatal(err)
+	}
+	if !doneOut.OK || doneOut.Deleted != 1 || doneOut.Section != "done" || doneOut.Backup != nil {
+		t.Fatalf("body done response %s", body)
+	}
+	assertIDs("abandon-run", "abandon-q", "block-old", "fail", "stall", "block", "run", "queue")
+
+	saw := false
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && !saw {
+		ev, data = readSSE(t, reader)
+		if ev != "snapshot" {
+			continue
+		}
+		var snap store.Snapshot
+		if err := json.Unmarshal([]byte(data), &snap); err != nil {
+			t.Fatalf("snapshot %s: %v", data, err)
+		}
+		ids := map[string]bool{}
+		for _, j := range snap.Jobs {
+			ids[j.JobID] = true
+		}
+		if ids["done"] || !ids["run"] || !ids["stall"] || len(snap.Jobs) != 8 {
+			t.Fatalf("snapshot jobs %v", ids)
+		}
+		saw = true
+	}
+	if !saw {
+		t.Fatalf("no section snapshot, last %s %s", ev, data)
+	}
+
+	postOK(`{"agent":"other","job_id":"done2","state":"done","title":"Done again"}`)
+	code, body = doDelete(ts.URL+"/api/jobs?confirm=done", `{"confirm":"all"}`)
+	if code != 200 {
+		t.Fatalf("query done %d %s", code, body)
+	}
+	var queryDone clearOut
+	if err := json.Unmarshal([]byte(body), &queryDone); err != nil {
+		t.Fatal(err)
+	}
+	if !queryDone.OK || queryDone.Deleted != 1 || queryDone.Section != "done" || queryDone.Backup != nil {
+		t.Fatalf("query done response %s", body)
+	}
+	assertIDs("abandon-run", "abandon-q", "block-old", "fail", "stall", "block", "run", "queue")
+	if _, ok := jobsByID()["done2"]; ok {
+		t.Fatal("query confirm=done left done2")
+	}
+
+	code, body = doDelete(ts.URL+"/api/jobs?confirm=attention", `{"confirm":"all"}`)
+	if code != 200 {
+		t.Fatalf("attention %d %s", code, body)
+	}
+	var attn clearOut
+	if err := json.Unmarshal([]byte(body), &attn); err != nil {
+		t.Fatal(err)
+	}
+	if !attn.OK || attn.Deleted != 6 || attn.Section != "attention" || attn.Backup != nil {
+		t.Fatalf("attention response %s", body)
+	}
+	assertIDs("run", "queue")
+
+	code, body = doDelete(ts.URL+"/api/jobs?confirm=nope", "")
+	var bad clearOut
+	if err := json.Unmarshal([]byte(body), &bad); err != nil {
+		t.Fatal(err)
+	}
+	if code != 400 || bad.Error != `confirm must be "all", "attention", "progress", "queued", or "done"` {
+		t.Fatalf("bad confirm %d %s", code, body)
+	}
+	assertIDs("run", "queue")
+	code, body = doDelete(ts.URL+"/api/jobs", `{`)
+	var badJSON struct {
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(body), &badJSON); err != nil {
+		t.Fatalf("bad json %d %s: %v", code, body, err)
+	}
+	if code != 400 || badJSON.Error != "invalid json" {
+		t.Fatalf("bad json %d %s", code, body)
+	}
+	assertIDs("run", "queue")
+	backups, err := filepath.Glob(filepath.Join(dir, "jobs-backup-*.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(backups) != 0 {
+		t.Fatalf("backup written before confirm=all: %v", backups)
+	}
+
+	code, body = doDelete(ts.URL+"/api/jobs?confirm=queued", "")
+	if code != 200 {
+		t.Fatalf("queued %d %s", code, body)
+	}
+	var queuedOut clearOut
+	if err := json.Unmarshal([]byte(body), &queuedOut); err != nil {
+		t.Fatal(err)
+	}
+	if !queuedOut.OK || queuedOut.Deleted != 1 || queuedOut.Section != "queued" || queuedOut.Backup != nil {
+		t.Fatalf("queued response %s", body)
+	}
+	assertIDs("run")
+
+	code, body = doDelete(ts.URL+"/api/jobs?confirm=all", "")
+	if code != 200 {
+		t.Fatalf("all %d %s", code, body)
+	}
+	var allOut struct {
+		OK      bool   `json:"ok"`
+		Deleted int    `json:"deleted"`
+		Backup  string `json:"backup"`
+	}
+	if err := json.Unmarshal([]byte(body), &allOut); err != nil {
+		t.Fatal(err)
+	}
+	if !allOut.OK || allOut.Deleted != 1 || allOut.Backup == "" {
+		t.Fatalf("all response %s", body)
+	}
+	if _, err := os.Stat(allOut.Backup); err != nil {
+		t.Fatal(err)
+	}
+	assertIDs()
+}
+
 func TestIndexSelfContained(t *testing.T) {
 	html := string(indexHTML)
-	for _, needle := range []string{"StatusPan", "EventSource", "/api/stream", "STALLED", "statuspan-theme", "/api/events", "#/agent/", "#/job/", "prefers-color-scheme", "Needs attention", "__statuspan", "Clear all", "Offline", "statuspan-expand-queued"} {
+	for _, needle := range []string{"StatusPan", "EventSource", "/api/stream", "STALLED", "statuspan-theme", "/api/events", "#/agent/", "#/job/", "prefers-color-scheme", "Needs attention", "__statuspan", "Clear all", "Clear done", "data-clear-section", "Offline", "statuspan-expand-queued"} {
 		if !strings.Contains(html, needle) {
 			t.Fatalf("index missing %s", needle)
 		}

@@ -436,6 +436,82 @@ func TestBackoffRedactsToken(t *testing.T) {
 	}
 }
 
+func TestClearSectionStaysClearedAcrossSync(t *testing.T) {
+	token := "read-token-do-not-leak"
+	when := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
+	runTitle := "Working"
+	doneTitle := "Shipped"
+	seq := int64(1)
+	fake := &fakeRelay{token: token}
+	fake.events = append(fake.events,
+		relayEvent{
+			Cursor: 1, N: 1, Agent: "Bot", JobID: "run", State: "running",
+			Title: &runTitle, Seq: &seq, TS: when, Kind: "update",
+		},
+		relayEvent{
+			Cursor: 2, N: 2, Agent: "Bot", JobID: "ship", State: "done",
+			Title: &doneTitle, Seq: &seq, TS: when.Add(time.Second), Kind: "update",
+		},
+	)
+	ts := httptest.NewServer(fake)
+	defer ts.Close()
+	dir := t.TempDir()
+	writeRelayJSON(t, dir, ts.URL, "home", token)
+	st, err := store.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	syncer, err := New(Options{Store: st, DataDir: dir, Client: ts.Client()})
+	if err != nil || syncer == nil {
+		t.Fatalf("syncer=%v err=%v", syncer, err)
+	}
+	if err := syncer.SyncOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if job, ok := st.Get("Bot", "run"); !ok || job.Title != "Working" || job.State != "running" {
+		t.Fatalf("run %+v ok=%v", job, ok)
+	}
+	if job, ok := st.Get("Bot", "ship"); !ok || job.State != "done" {
+		t.Fatalf("ship %+v ok=%v", job, ok)
+	}
+	n, err := st.ClearSection("done")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("deleted %d", n)
+	}
+	if _, ok := st.Get("Bot", "ship"); ok {
+		t.Fatal("done job survived clear")
+	}
+	if err := syncer.SyncOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := st.Get("Bot", "ship"); ok {
+		t.Fatal("sync reapplied the cleared job")
+	}
+	if job, ok := st.Get("Bot", "run"); !ok || job.Title != "Working" || job.State != "running" {
+		t.Fatalf("run after resync %+v ok=%v", job, ok)
+	}
+	back := "Again"
+	seq2 := int64(2)
+	fake.add(relayEvent{
+		Cursor: 3, N: 3, Agent: "Bot", JobID: "ship", State: "running",
+		Title: &back, Seq: &seq2, TS: when.Add(time.Minute), Kind: "update",
+	})
+	if err := syncer.SyncOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	job, ok := st.Get("Bot", "ship")
+	if !ok || job.Title != "Again" || job.State != "running" {
+		t.Fatalf("revived %+v ok=%v", job, ok)
+	}
+	if kept, ok := st.Get("Bot", "run"); !ok || kept.Title != "Working" {
+		t.Fatalf("run after revive %+v ok=%v", kept, ok)
+	}
+}
+
 func TestPartialRelayJSON(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, configFile), []byte(`{"url":"http://127.0.0.1:9"}`), 0o600); err != nil {

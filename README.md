@@ -4,7 +4,7 @@ Local board for which AI agent is working on what. One Go binary, loopback only,
 
 A job update has `agent`, `job_id`, and `state` (`queued`, `running`, `blocked`, `done`, `failed`). Later updates may omit `state`. When `seq` is set, the highest seq wins. An older seq stays in history and does not change the job. Bots cannot post `abandoned`. That word is not a stored state.
 
-StatusPan is one-way. Bots push updates. StatusPan never pushes back: no owner nudges, no webhooks, and no board buttons that edit a job. Clear all is the one action that removes jobs, and it asks first.
+StatusPan is one-way. Bots push updates. StatusPan never pushes back: no owner nudges, no webhooks, and no board buttons that edit a job. Jobs are removed by Clear all, which asks first, or by a clear control on one section.
 
 A running job with no heartbeat for `ttl` seconds (default 600) is stalled. Queued, blocked, done, and failed are not. Stalled and abandoned are derived when the board is read. They are not written into the JSONL log.
 
@@ -40,7 +40,7 @@ The relay in `relay/` is an optional Cloudflare Worker. Bots that are not on thi
 ./statuspan serve
 ```
 
-Open http://127.0.0.1:4477 (`/` or `#/`). The home page is an airport-style board: Needs attention (failed, blocked, stalled, and abandoned), then In progress. Queued and Done stay folded until you open them. Coming back to the window refreshes the board. If the connection is stale, the header shows an offline / last-updated warning instead of the live clock. Click a row to open that job (`/#/job/<agent>/<job_id>`). The bot name in the job details opens that bot's jobs and timeline (`/#/agent/<name>`). Press `T`, or the top-bar button, to toggle day and night.
+Open http://127.0.0.1:4477 (`/` or `#/`). The home page is an airport-style board: Needs attention (failed, blocked, stalled, and abandoned), then In progress. Queued and Done stay folded until you open them. Each visible section header has its own clear: Clear on Needs attention, In progress, and Queued, and Clear done on Done. Clear all stays in the top menu. Coming back to the window refreshes the board. If the connection is stale, the header shows an offline / last-updated warning instead of the live clock. Click a row to open that job (`/#/job/<agent>/<job_id>`). The bot name in the job details opens that bot's jobs and timeline (`/#/agent/<name>`). Press `T`, or the top-bar button, to toggle day and night.
 
 ```bash
 curl -s -X POST localhost:4477/api/jobs -H 'Content-Type: application/json' -d '{"agent":"MyBot","job_id":"build-1","title":"Build v1","state":"running","progress":40,"link":"https://example.com","seq":1,"ttl":600}'
@@ -51,9 +51,14 @@ curl -s 'localhost:4477/api/events?agent=MyBot'
 curl -N localhost:4477/api/stream
 ./statuspan ls
 ./statuspan clear --yes
+./statuspan clear --yes --section done
 ```
 
-`statuspan clear --yes` deletes every job and its history through the local daemon (`--addr` / `STATUSPAN_ADDR`). Without `--yes` it changes nothing. `DELETE /api/jobs?confirm=all` does the same. A JSON body `{"confirm":"all"}` is also accepted. Any other confirmation is a 400 and leaves the board alone. Before the wipe, the daemon copies the log to `jobs-backup-<unix>.jsonl` in the data directory.
+`statuspan clear --yes` deletes every job and its history through the local daemon (`--addr` / `STATUSPAN_ADDR`). `statuspan clear --yes --section done` (or `attention`, `progress`, `queued`) deletes only that section. Without `--yes` it changes nothing. An unknown `--section` is an error and does not call the daemon.
+
+`DELETE /api/jobs?confirm=all` wipes the board. A JSON body `{"confirm":"all"}` is also accepted. The query wins over the body. Before the wipe, the daemon copies the log to `jobs-backup-<unix>.jsonl` in the data directory. The response is `{"ok":true,"deleted":N,"backup":"..."}`.
+
+`DELETE /api/jobs?confirm=done` (or `attention`, `progress`, `queued`) deletes only the jobs in that section and leaves the rest of the log. There is no backup. The response is `{"ok":true,"deleted":N,"section":"done"}`. Sections match the board: attention is failed, blocked, stalled, and abandoned (including an abandoned queued or blocked job); progress is a healthy running job; queued is queued and not abandoned; done is done. A missing or any other confirmation is a 400 (`confirm must be "all", "attention", "progress", "queued", or "done"`) and leaves the board alone. Invalid JSON is `400` `invalid json`.
 
 launchd, from this repo:
 

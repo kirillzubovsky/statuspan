@@ -123,7 +123,7 @@ Usage:
             [--verbose] -- COMMAND [ARGS...]
   statuspan agent [print|prompt|json|install] [--target LIST] [--dir PATH] [--home PATH] [--dry-run]
   statuspan ls [--addr host:port]
-  statuspan clear --yes [--addr host:port]
+  statuspan clear --yes [--section attention|progress|queued|done] [--addr host:port]
   statuspan version
 
 AI agents: run 'statuspan agent' for instructions or 'statuspan agent install' to install the skill.
@@ -473,16 +473,29 @@ func lsCmd(args []string) error {
 func clearCmd(args []string) error {
 	fs := newFlagSet("clear")
 	addr := fs.String("addr", envOr("STATUSPAN_ADDR", server.DefaultAddr), "server address")
-	yes := fs.Bool("yes", false, "delete every job and its history")
+	yes := fs.Bool("yes", false, "delete the jobs")
+	section := fs.String("section", "", "section to clear: attention, progress, queued, or done")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	confirm := "all"
+	if *section != "" {
+		switch *section {
+		case "attention", "progress", "queued", "done":
+			confirm = *section
+		default:
+			return fmt.Errorf("unknown --section %q", *section)
+		}
+	}
 	if !*yes {
-		return fmt.Errorf("clear deletes every job; pass --yes")
+		if confirm == "all" {
+			return fmt.Errorf("clear deletes every job; pass --yes")
+		}
+		return fmt.Errorf("clear --section %s deletes that section; pass --yes", confirm)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, endpoint(*addr, "/api/jobs?confirm=all"), nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, endpoint(*addr, "/api/jobs?confirm="+confirm), nil)
 	if err != nil {
 		return err
 	}
@@ -511,7 +524,11 @@ func clearCmd(args []string) error {
 		}
 		return fmt.Errorf("DELETE /api/jobs: %s: %s", resp.Status, msg)
 	}
-	fmt.Printf("deleted %d\n%s\n", out.Deleted, out.Backup)
+	if confirm == "all" {
+		fmt.Printf("deleted %d\n%s\n", out.Deleted, out.Backup)
+	} else {
+		fmt.Printf("deleted %d\n", out.Deleted)
+	}
 	return nil
 }
 

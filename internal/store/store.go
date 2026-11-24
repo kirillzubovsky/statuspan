@@ -279,6 +279,77 @@ func (s *Store) Delete(agent, jobID string) (bool, error) {
 	return true, nil
 }
 
+// BoardSection is the board group for v: attention, progress, queued, or done.
+// Empty means the job would not appear. Stalled and abandoned running jobs are
+// attention, as are abandoned queued and blocked jobs. This matches the board.
+func BoardSection(v JobView) string {
+	if v.State != "done" && v.State != "failed" && v.Abandoned {
+		return "attention"
+	}
+	if v.State == "running" && v.Stalled {
+		return "attention"
+	}
+	switch v.State {
+	case "failed", "blocked":
+		return "attention"
+	case "running":
+		return "progress"
+	case "queued":
+		return "queued"
+	case "done":
+		return "done"
+	default:
+		return ""
+	}
+}
+
+// ClearSection appends a delete tombstone for every job currently in section.
+// It does not truncate the log or write a backup. Other jobs and their history
+// stay. An invalid section is a validation error and changes nothing. When
+// nothing matches, it publishes no snapshot. Otherwise subscribers get one
+// snapshot of the remaining board. A later Apply for a cleared job_id can
+// bring that job back, same as Delete.
+func (s *Store) ClearSection(section string) (int, error) {
+	switch section {
+	case "attention", "progress", "queued", "done":
+	default:
+		return 0, invalid(`section must be "attention", "progress", "queued", or "done"`)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.file == nil {
+		return 0, fmt.Errorf("store is closed")
+	}
+	now := s.now()
+	var matched []JobView
+	for _, job := range s.listLocked(now) {
+		if BoardSection(job) == section {
+			matched = append(matched, job)
+		}
+	}
+	if len(matched) == 0 {
+		return 0, nil
+	}
+	n := 0
+	var appendErr error
+	for _, job := range matched {
+		id := s.nextN + 1
+		rec := logRecord{Kind: "delete", N: id, TS: now, Agent: job.Agent, JobID: job.JobID}
+		if err := s.appendRecord(rec); err != nil {
+			appendErr = err
+			break
+		}
+		s.nextN = id
+		s.removeJob(job.Agent, job.JobID, now, id, false)
+		n++
+	}
+	if n > 0 {
+		snap := s.snapshotLocked()
+		s.send(Push{Snapshot: &snap})
+	}
+	return n, appendErr
+}
+
 // Clear deletes every job and all history. It fsyncs the live log, copies it to
 // jobs-backup-<unix>.jsonl in the data directory, then truncates the log so a
 // later Open replays an empty board. Subscribers receive a fresh snapshot.

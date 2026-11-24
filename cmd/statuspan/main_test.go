@@ -377,6 +377,71 @@ func TestClearCommandRequiresYesAndPrintsBackup(t *testing.T) {
 	}
 }
 
+func TestClearSectionCommand(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	if _, err := st.Apply(store.Update{Agent: "bot", JobID: "run", State: "running", Title: strPtr("Stay")}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Apply(store.Update{Agent: "bot", JobID: "ship", State: "done", Title: strPtr("Ship")}); err != nil {
+		t.Fatal(err)
+	}
+	hit := 0
+	guard := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hit++
+		http.Error(w, "production must not be cleared", http.StatusInternalServerError)
+	}))
+	t.Cleanup(guard.Close)
+
+	err = clearCmd([]string{"--addr", guard.URL, "--section", "done"})
+	if err == nil || !strings.Contains(err.Error(), "--yes") || !strings.Contains(err.Error(), "done") {
+		t.Fatalf("missing --yes: %v", err)
+	}
+	err = clearCmd([]string{"--addr", guard.URL, "--yes", "--section", "nope"})
+	if err == nil || !strings.Contains(err.Error(), "unknown") {
+		t.Fatalf("unknown section: %v", err)
+	}
+	if hit != 0 {
+		t.Fatal("refused clear called the server")
+	}
+	if _, ok := st.Get("bot", "run"); !ok {
+		t.Fatal("running job removed")
+	}
+	if _, ok := st.Get("bot", "ship"); !ok {
+		t.Fatal("done job removed")
+	}
+
+	ts := httptest.NewServer(server.New(st).Handler())
+	t.Cleanup(ts.Close)
+	var cmdErr error
+	withStdout(t, func() {
+		cmdErr = clearCmd([]string{"--addr", ts.URL, "--yes", "--section", "done"})
+	})
+	if cmdErr != nil {
+		t.Fatal(cmdErr)
+	}
+	if lastStdout != "deleted 1\n" {
+		t.Fatalf("stdout %q", lastStdout)
+	}
+	if _, ok := st.Get("bot", "ship"); ok {
+		t.Fatal("done job survived --section done")
+	}
+	if job, ok := st.Get("bot", "run"); !ok || job.Title != "Stay" {
+		t.Fatalf("running %+v ok=%v", job, ok)
+	}
+	backups, err := filepath.Glob(filepath.Join(dir, "jobs-backup-*.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(backups) != 0 {
+		t.Fatalf("section clear wrote backups %v", backups)
+	}
+}
+
 var lastStdout string
 
 func withStdout(t *testing.T, fn func()) error {

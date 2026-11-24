@@ -1,6 +1,6 @@
 # StatusPan
 
-> Complete reference for the local daemon and the optional self-hosted relay. StatusPan is one Go binary on loopback, plus an airport-style board. Agents push job updates. StatusPan never pushes back: no nudges, no webhooks, and no board buttons that edit a job. Clear all is the only action that removes jobs, and it asks first.
+> Complete reference for the local daemon and the optional self-hosted relay. StatusPan is one Go binary on loopback, plus an airport-style board. Agents push job updates. StatusPan never pushes back: no nudges, no webhooks, and no board buttons that edit a job. Jobs are removed by Clear all, which asks first, or by a clear control on one section.
 
 Source: <https://github.com/kirillzubovsky/statuspan>. MIT license. Short version: <https://statuspan.com/llms.txt>. Machine-readable: <https://statuspan.com/openapi.json> and <https://statuspan.com/schema/job-update.schema.json>.
 
@@ -15,7 +15,7 @@ statuspan serve
 
 The installer detects macOS or Linux, arm64 or amd64, downloads the release binary, and installs it to `~/.local/bin/statuspan`. No sudo. Then open <http://127.0.0.1:4477>.
 
-The board groups Needs attention (failed, blocked, stalled, and abandoned), then In progress. Queued and Done stay folded until opened. `T` toggles day and night.
+The board groups Needs attention (failed, blocked, stalled, and abandoned), then In progress. Queued and Done stay folded until opened. Each visible section header can clear that section. Clear all stays in the top menu. `T` toggles day and night.
 
 ## What belongs on the board
 
@@ -215,7 +215,7 @@ Install flags:
 
 ### statuspan clear
 
-`statuspan clear --yes [--addr host:port]`. Without `--yes` it changes nothing and exits 1 (`clear deletes every job; pass --yes`). With `--yes` it calls `DELETE /api/jobs?confirm=all` and prints `deleted N` and the backup path.
+`statuspan clear --yes [--section attention|progress|queued|done] [--addr host:port]`. Without `--yes` it changes nothing and exits 1. With no `--section`, it deletes every job and its history (`DELETE /api/jobs?confirm=all`) and prints `deleted N` and the backup path. `--section done` (or `attention`, `progress`, `queued`) deletes only that section, prints `deleted N`, and does not print a backup. An unknown `--section` is an error and does not call the daemon.
 
 ### statuspan version / help
 
@@ -302,20 +302,30 @@ Removes one job and appends a delete tombstone. `200` `{"ok":true,"deleted":true
 
 ### DELETE /api/jobs
 
-Deletes every job and its history. Requires confirmation.
+Deletes every job, or one board section. Requires confirmation. The query wins over a JSON body.
 
-- Query `?confirm=all`, or a JSON body `{"confirm":"all"}`.
-- If the query contains `confirm`, the body is ignored. Any value other than `all` is `400` `confirm must be "all"`.
-- A missing or empty body, when there is no query, is the same 400.
+- `confirm=all` deletes every job and its history. The daemon copies the log to `jobs-backup-<unix>.jsonl` first, then truncates the log.
+- `confirm=attention`, `progress`, `queued`, or `done` deletes only the jobs in that section. Each one gets a delete tombstone. The rest of the log, and the other jobs, stay. There is no backup.
+- Sections match the board. Attention is failed, blocked, stalled, and abandoned, including an abandoned queued or blocked job. Progress is a healthy running job. Queued is queued and not abandoned. Done is done.
+- Query `?confirm=...`, or a JSON body `{"confirm":"..."}`. If the query contains `confirm`, the body is ignored.
+- A missing confirm, or any other value, is `400` `confirm must be "all", "attention", "progress", "queued", or "done"`. The board does not change.
 - Invalid JSON is `400` `invalid json`.
 
-`200`:
+`200` for `confirm=all`:
 
 ```json
 {"ok":true,"deleted":2,"backup":"/path/to/jobs-backup-1764000000.jsonl"}
 ```
 
-`backup` is the absolute path of a copy of the log, `jobs-backup-<unix>.jsonl`, taken before the log is truncated. `deleted` is how many jobs were removed. A second clear returns `deleted: 0` and another backup file. A failure to copy or truncate is `500`.
+`backup` is the absolute path of the copy. `deleted` is how many jobs were removed. A second clear of an empty board returns `deleted: 0` and another backup file. A failure to copy or truncate is `500`.
+
+`200` for a section:
+
+```json
+{"ok":true,"deleted":2,"section":"done"}
+```
+
+`section` is the confirm value. `deleted` is 0 when that section was already empty, and the live stream gets no snapshot in that case. A section clear with `deleted` greater than 0 publishes one snapshot of the remaining board. A later post for a cleared `job_id` can bring that job back.
 
 ### GET /api/events
 
@@ -605,4 +615,4 @@ Recurring jobs, in full:
 - Once that recurring job is fixed or unblocked, push `done` so it clears out of Needs attention.
 - A routine that produces a separate, finishable piece of work can post that work under its own `job_id`. A quiet run posts nothing.
 
-Do not post `stalled` or `abandoned`. Do not clear the board unless a person asked for `statuspan clear --yes`.
+Do not post `stalled` or `abandoned`. Do not clear the board, or a section of it, unless a person asked (`statuspan clear --yes`, or `statuspan clear --yes --section done`).

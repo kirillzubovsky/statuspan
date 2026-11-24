@@ -104,10 +104,13 @@ a.who:hover{color:var(--text);text-decoration:none}
 .b-upd{font-size:13px;color:var(--text2);text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
 .b-prog .pct{flex:none;width:36px;text-align:right;font-variant-numeric:tabular-nums}
 .sh{display:flex;align-items:center;gap:8px;height:40px;margin:0;padding:0 20px;font-size:11.5px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--text3);background:color-mix(in srgb,var(--surf2) 70%,var(--bg));border-bottom:1px solid var(--border)}
-.fold{display:flex;align-items:center;gap:8px;width:100%;min-height:48px;margin:0;padding:0 20px;border:0;border-bottom:1px solid var(--border);background:color-mix(in srgb,var(--surf2) 70%,var(--bg));color:var(--text);font:inherit;font-size:14px;font-weight:650;cursor:pointer;text-align:left}
+.fold{display:flex;align-items:center;gap:8px;width:100%;min-height:48px;margin:0;padding:0 20px 0 0;border:0;border-bottom:1px solid var(--border);background:color-mix(in srgb,var(--surf2) 70%,var(--bg));color:var(--text);font:inherit;font-size:14px;font-weight:650}
 .fold:hover{background:var(--surf2)}
+.fold-toggle{appearance:none;display:flex;align-items:center;gap:8px;flex:1;min-width:0;min-height:48px;margin:0;padding:0 0 0 20px;border:0;background:transparent;color:inherit;font:inherit;cursor:pointer;text-align:left}
 .fold .tri{width:1em;color:var(--text3);font-size:12px}
 .fold .n{color:var(--text3);font-weight:550;font-variant-numeric:tabular-nums}
+.sec-clear{appearance:none;margin-left:auto;flex:none;border:0;background:transparent;color:var(--text3);font-family:inherit;font-size:11px;font-weight:650;letter-spacing:.08em;line-height:1;text-transform:uppercase;white-space:nowrap;cursor:pointer;padding:4px 0 4px 12px}
+.sec-clear:hover{color:var(--text)}
 .menu{position:relative;flex:none}
 .btn.slim{height:26px;padding:0 8px;font-size:12px}
 .btn.more{width:28px;height:26px;padding:0;justify-content:center;font-size:16px;line-height:1}
@@ -639,17 +642,25 @@ a.ext{color:var(--accent);font-size:14px;text-decoration:none}
     return list.map(function (job) { return renderBoardRow(job, sel); }).join("");
   }
 
+  function clearControl(id, title) {
+    var label = id === "done" ? "Clear done" : "Clear";
+    var aria = id === "done" ? "Clear done" : "Clear " + title;
+    return '<button type="button" class="sec-clear" data-clear-section="' + esc(id) + '" aria-label="' + esc(aria) + '">' + esc(label) + "</button>";
+  }
+
   function sectionBlock(id, title, rows) {
     return '<section class="bsec" data-board-section="' + id + '" aria-labelledby="sec-' + id + '">' +
-      '<h2 class="sh" id="sec-' + id + '">' + esc(title) + "</h2>" + rows + "</section>";
+      '<h2 class="sh" id="sec-' + id + '"><span>' + esc(title) + "</span>" + clearControl(id, title) + "</h2>" + rows + "</section>";
   }
 
   function foldBlock(id, title, list, sel) {
     var open = foldOpen(foldKey(id));
     var rows = open ? rowsHTML(list, sel) : "";
     return '<section class="bsec" data-board-section="' + id + '">' +
-      '<button type="button" class="fold" data-fold="' + id + '" aria-expanded="' + (open ? "true" : "false") + '">' +
+      '<div class="fold">' +
+      '<button type="button" class="fold-toggle" data-fold="' + id + '" aria-expanded="' + (open ? "true" : "false") + '">' +
       '<span class="tri" aria-hidden="true">' + (open ? "▾" : "▸") + "</span><span>" + esc(title) + '</span> <span class="n">' + list.length + "</span></button>" +
+      clearControl(id, title) + "</div>" +
       rows + "</section>";
   }
 
@@ -1069,18 +1080,36 @@ a.ext{color:var(--accent);font-size:14px;text-decoration:none}
     if (btn) btn.setAttribute("aria-expanded", "false");
   }
 
-  function clearAll() {
-    var n = jobs.length;
-    if (!window.confirm("Delete all " + n + " jobs? A backup is saved.")) return;
-    fetch("/api/jobs?confirm=all", { method: "DELETE" }).then(function (r) {
+  function clearBoard(confirmValue, ask) {
+    if (ask && !window.confirm(ask)) return;
+    fetch("/api/jobs?confirm=" + encodeURIComponent(confirmValue), { method: "DELETE" }).then(function (r) {
       if (!r.ok) throw new Error(String(r.status));
       return r.json();
     }).then(function () {
-      if (location.hash && location.hash !== "#" && location.hash !== "#/") location.hash = "#/";
       return refetchJobs();
+    }).then(function () {
+      var route = parseRoute();
+      if (route.name === "job" && route.agent && route.jobId && !findJob(route.agent, route.jobId)) {
+        location.hash = "#/";
+      }
     }).catch(function () {
-      window.alert("Couldn't clear the board.");
+      window.alert(confirmValue === "all" ? "Couldn't clear the board." : "Couldn't clear that section.");
     });
+  }
+
+  function clearAll() {
+    clearBoard("all", "Delete all " + jobs.length + " jobs? A backup is saved.");
+  }
+
+  function clearSection(id) {
+    var parts = partitionBoard();
+    var list = parts[id] || [];
+    if (!list.length) return;
+    var ask = "";
+    if (id === "progress") {
+      ask = "Delete " + list.length + " in-progress job" + (list.length === 1 ? "" : "s") + "?";
+    }
+    clearBoard(id, ask);
   }
 
   function openFromRow(row) {
@@ -1098,6 +1127,12 @@ a.ext{color:var(--accent);font-size:14px;text-decoration:none}
   }
 
   document.getElementById("app").addEventListener("click", function (e) {
+    var sectionClear = e.target.closest("[data-clear-section]");
+    if (sectionClear) {
+      e.preventDefault();
+      clearSection(sectionClear.getAttribute("data-clear-section"));
+      return;
+    }
     if (e.target.closest("a")) return;
     var fold = e.target.closest("[data-fold]");
     if (fold) {

@@ -75,7 +75,7 @@ func NewDiscovery(version string) Discovery {
 			{Name: "run", Usage: "statuspan run --agent NAME --job ID [--title T] [--ttl SEC] [--heartbeat SEC] [--link URL] [--recurring] [--url ENDPOINT | --addr host:port | --relay URL --workspace NAME (--token TOKEN | --token-file PATH)] [--verbose] -- COMMAND [ARGS...]"},
 			{Name: "agent", Usage: "statuspan agent [print|prompt|json|install] [--target LIST] [--dir PATH] [--home PATH] [--dry-run]"},
 			{Name: "ls", Usage: "statuspan ls [--addr host:port]"},
-			{Name: "clear", Usage: "statuspan clear --yes [--addr host:port]"},
+			{Name: "clear", Usage: "statuspan clear --yes [--section attention|progress|queued|done] [--addr host:port]"},
 			{Name: "version", Usage: "statuspan version"},
 		},
 		Env: []EnvVar{
