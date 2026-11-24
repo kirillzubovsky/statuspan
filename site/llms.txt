@@ -1,8 +1,12 @@
 # StatusPan
 
-> StatusPan is an open-source local board for which AI agent is working on what. One Go binary listens on loopback. Agents push job updates and never get a callback. A self-hosted Cloudflare relay is optional for agents on another machine. Version 0.2.0.
+> StatusPan is an open-source local board for which AI agent is working on what. One Go binary listens on loopback. Agents push job updates and never get a callback. A self-hosted Cloudflare relay is optional for agents on another machine. Version 0.3.0.
 
 Quick install, then serve. The board is at http://127.0.0.1:4477.
+
+On macOS, [StatusPan.dmg](https://github.com/kirillzubovsky/statuspan/releases/latest/download/StatusPan.dmg) is a WKWebView window on the local board. It starts the bundled `statuspan serve` if nothing answers on `STATUSPAN_ADDR` (default `127.0.0.1:4477`), and it stops only a daemon it started.
+
+The CLI works on macOS and Linux and installs to `~/.local/bin/statuspan`:
 
 ```bash
 curl -fsSL https://statuspan.com/install.sh | sh
@@ -44,5 +48,7 @@ curl -s -X POST "${STATUSPAN_URL:-http://127.0.0.1:4477/api/jobs}" -H 'Content-T
 - [Agent skill](https://statuspan.com/skill.md): drop-in instructions for a coding agent
 - [OpenAPI](https://statuspan.com/openapi.json): local daemon and self-hosted relay
 - [Job update schema](https://statuspan.com/schema/job-update.schema.json): JSON Schema for one update or a batch
-- [Installer](https://statuspan.com/install.sh): macOS and Linux, no sudo
+- [Mac app](https://github.com/kirillzubovsky/statuspan/releases/latest/download/StatusPan.dmg): StatusPan.dmg, universal, macOS 12 or later
+- [Installer](https://statuspan.com/install.sh): macOS and Linux, no sudo, installs to `~/.local/bin/statuspan`
+- [Releases](https://github.com/kirillzubovsky/statuspan/releases/latest): CLI binaries and StatusPan.dmg
 - [Source](https://github.com/kirillzubovsky/statuspan): MIT

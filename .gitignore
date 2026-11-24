@@ -1,6 +1,9 @@
 # built binary
 /statuspan
 
+# macOS app build output (StatusPan.app and StatusPan.dmg)
+/macos/.build/
+
 # local data if the server is pointed at the repo
 /data/
 

@@ -39,9 +39,12 @@
       "name": "StatusPan",
       "applicationCategory": "DeveloperApplication",
       "operatingSystem": "macOS, Linux",
-      "softwareVersion": "0.2.0",
+      "softwareVersion": "0.3.0",
       "license": "https://opensource.org/licenses/MIT",
-      "downloadUrl": "https://statuspan.com/install.sh",
+      "downloadUrl": [
+        "https://github.com/kirillzubovsky/statuspan/releases/latest/download/StatusPan.dmg",
+        "https://statuspan.com/install.sh"
+      ],
       "codeRepository": "https://github.com/kirillzubovsky/statuspan",
       "screenshot": "https://statuspan.com/airport-night.png",
       "url": "https://statuspan.com/",
@@ -132,6 +135,13 @@ a:hover{text-decoration:underline}
 .live::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--done);box-shadow:0 0 0 3px var(--done-bg);flex:none}
 .btn{display:inline-flex;align-items:center;height:28px;padding:0 10px;border:1px solid var(--border2);border-radius:6px;background:var(--surf);color:var(--text);box-shadow:var(--shadow)}
 .btn:hover{background:var(--surf2);text-decoration:none}
+a.btn.primary{height:36px;padding:0 16px;background:var(--stalled);color:#1b1c20;border-color:transparent;font-weight:650;font-size:14px}
+a.btn.primary:hover{background:var(--stalled);filter:brightness(1.08)}
+.hero-more{margin:16px 0 0;font-size:14px}
+.dl-cta{margin:0 0 12px}
+.dl-all{margin:14px 0 0;font-size:12px}
+.dl-all a{color:inherit}
+.dl-all a:hover{color:var(--text2)}
 .top{min-height:50px;display:flex;align-items:center;border-bottom:1px solid var(--border);background:var(--surf);position:sticky;top:0;z-index:4}
 .top .inner,.wrap{max-width:1120px;margin:0 auto;padding:0 20px}
 .top .inner{width:100%;min-height:50px;display:flex;align-items:center;gap:14px}
@@ -199,6 +209,7 @@ code{font:inherit}
   <section class="hero">
    <h1>Which bot is working on what.</h1>
    <p class="lede">StatusPan is an open-source, super fast control panel for AI agents. One local Go binary draws an airport departures board. Bots push one way, with one curl. A running job that goes quiet is stalled, then abandoned. A Cloudflare relay is optional if you want to self-host it. A hosted paid version is coming soon.</p>
+   <p class="hero-more"><a href="https://github.com/kirillzubovsky/statuspan/releases/latest/download/StatusPan.dmg">Download for Mac</a></p>
    <figure class="shot">
     <img src="airport-night.png" width="2560" height="1324" alt="StatusPan night board, an airport-style list of fictional bots, jobs, and statuses" fetchpriority="high" decoding="async">
    </figure>
@@ -297,13 +308,13 @@ statuspan run --agent "My Agent" --job hello -- sleep 5</code></pre>
 
   <section class="panel" aria-labelledby="get">
    <h2 class="sh" id="get">Download</h2>
-   <p class="note">Direct binaries from the latest GitHub release. These are the files the installer fetches. <span class="mono">chmod +x</span> and move the file to <span class="mono">~/.local/bin/statuspan</span>.</p>
-   <ul class="dl">
-    <li><a href="https://github.com/kirillzubovsky/statuspan/releases/latest/download/statuspan-darwin-arm64">macOS Apple silicon <span class="file mono">statuspan-darwin-arm64</span></a></li>
-    <li><a href="https://github.com/kirillzubovsky/statuspan/releases/latest/download/statuspan-darwin-amd64">macOS Intel <span class="file mono">statuspan-darwin-amd64</span></a></li>
-    <li><a href="https://github.com/kirillzubovsky/statuspan/releases/latest/download/statuspan-linux-amd64">Linux x86_64 <span class="file mono">statuspan-linux-amd64</span></a></li>
-    <li><a href="https://github.com/kirillzubovsky/statuspan/releases/latest/download/statuspan-linux-arm64">Linux arm64 <span class="file mono">statuspan-linux-arm64</span></a></li>
-   </ul>
+   <div class="note">
+    <p class="dl-cta"><a class="btn primary" href="https://github.com/kirillzubovsky/statuspan/releases/latest/download/StatusPan.dmg">Download for Mac</a></p>
+    <p>StatusPan.app opens your board in its own window and starts the bundled daemon if one isn't already running. Universal (Apple silicon and Intel), macOS 12 or later, signed and notarized.</p>
+    <p>Or install the CLI. It works on macOS and Linux and installs to <span class="mono">~/.local/bin/statuspan</span>.</p>
+    <pre><code>curl -fsSL https://statuspan.com/install.sh | sh</code></pre>
+    <p class="faint dl-all">All release files: <a href="https://github.com/kirillzubovsky/statuspan/releases/latest">github.com/kirillzubovsky/statuspan/releases/latest</a></p>
+   </div>
   </section>
 
   <section class="panel" aria-labelledby="faq">

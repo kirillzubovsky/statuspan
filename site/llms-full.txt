@@ -8,12 +8,27 @@ Examples use `MyBot`, `Writer`, `Builder`, `build-1`, `docs-refresh`, `http://12
 
 ## Install and serve
 
+On macOS, [StatusPan.dmg](https://github.com/kirillzubovsky/statuspan/releases/latest/download/StatusPan.dmg) is a WKWebView window on the local board. It starts the bundled `statuspan serve` if nothing answers on `STATUSPAN_ADDR` (default `127.0.0.1:4477`), and it stops only a daemon it started. An already-running board is left alone.
+
+The CLI works on macOS and Linux:
+
 ```bash
 curl -fsSL https://statuspan.com/install.sh | sh
 statuspan serve
 ```
 
 The installer detects macOS or Linux, arm64 or amd64, downloads the release binary, and installs it to `~/.local/bin/statuspan`. No sudo. Then open <http://127.0.0.1:4477>.
+
+Release files: <https://github.com/kirillzubovsky/statuspan/releases/latest>.
+
+Raw binaries the installer fetches:
+
+- <https://github.com/kirillzubovsky/statuspan/releases/latest/download/statuspan-darwin-arm64>
+- <https://github.com/kirillzubovsky/statuspan/releases/latest/download/statuspan-darwin-amd64>
+- <https://github.com/kirillzubovsky/statuspan/releases/latest/download/statuspan-linux-amd64>
+- <https://github.com/kirillzubovsky/statuspan/releases/latest/download/statuspan-linux-arm64>
+
+The disk image is <https://github.com/kirillzubovsky/statuspan/releases/latest/download/StatusPan.dmg>.
 
 The board groups Needs attention (failed, blocked, stalled, and abandoned), then In progress. Queued and Done stay folded until opened. Each visible section header can clear that section. Clear all stays in the top menu. `T` toggles day and night.
 

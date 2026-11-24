@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Build, Developer ID-sign, notarize, and publish StatusPan release binaries.
+# Build, Developer ID-sign, notarize, and publish StatusPan release binaries
+# and the Mac app disk image.
 # The signing identity and the notarytool keychain profile come from the
 # environment. This script does not name a certificate or a keychain profile.
 #
@@ -52,6 +53,9 @@ require_cmd gh
 require_cmd codesign
 require_cmd ditto
 require_cmd xcrun
+require_cmd swiftc
+require_cmd lipo
+require_cmd hdiutil
 
 if ! xcrun --find notarytool >/dev/null 2>&1; then
   echo "error: xcrun notarytool is not available" >&2
@@ -112,7 +116,7 @@ build_one() {
   local arch="$2"
   echo "building statuspan-${os}-${arch} version ${VERSION}"
   CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" \
-    go build -ldflags "-s -w -X main.version=${VERSION}" \
+    go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" \
     -o "${TMP}/statuspan-${os}-${arch}" ./cmd/statuspan
 }
 
@@ -155,6 +159,15 @@ notarize_darwin() {
 notarize_darwin "${TMP}/statuspan-darwin-arm64"
 notarize_darwin "${TMP}/statuspan-darwin-amd64"
 
+# Lipo of the signed thin binaries clears the signature. macos/build.sh
+# signs the universal daemon, the app, and the disk image.
+echo "building StatusPan.app"
+STATUSPAN_BIN_ARM64="${TMP}/statuspan-darwin-arm64" \
+STATUSPAN_BIN_AMD64="${TMP}/statuspan-darwin-amd64" \
+  macos/build.sh "$VERSION" --sign
+macos/notarize.sh macos/.build/StatusPan.dmg
+ditto macos/.build/StatusPan.dmg "$TMP/StatusPan.dmg"
+
 echo "writing SHA256SUMS"
 (
   cd "$TMP"
@@ -163,6 +176,7 @@ echo "writing SHA256SUMS"
     statuspan-darwin-amd64 \
     statuspan-linux-amd64 \
     statuspan-linux-arm64 \
+    StatusPan.dmg \
     > SHA256SUMS
 )
 
@@ -170,14 +184,25 @@ echo "writing SHA256SUMS"
 refuse_if_release_exists
 
 echo "creating GitHub release ${TAG}"
+notes_args=(
+  --notes "Binaries for ${TAG}. macOS builds are Developer ID signed and notarized. StatusPan.dmg is the Mac app: it opens the local board and starts the bundled daemon when one is not already running. SHA256SUMS lists the binaries and the app. Install the CLI with: curl -fsSL https://statuspan.com/install.sh | sh"
+)
+if [[ -n "${RELEASE_NOTES_FILE:-}" ]]; then
+  if [[ ! -f "$RELEASE_NOTES_FILE" ]]; then
+    echo "error: RELEASE_NOTES_FILE does not exist: ${RELEASE_NOTES_FILE}" >&2
+    exit 1
+  fi
+  notes_args=(--notes-file "$RELEASE_NOTES_FILE")
+fi
 gh release create "$TAG" --target "$(git rev-parse HEAD)" \
   "$TMP/statuspan-darwin-arm64" \
   "$TMP/statuspan-darwin-amd64" \
   "$TMP/statuspan-linux-amd64" \
   "$TMP/statuspan-linux-arm64" \
+  "$TMP/StatusPan.dmg" \
   "$TMP/SHA256SUMS" \
   --title "$TAG" \
-  --notes "Binaries for ${TAG}. macOS builds are Developer ID signed and notarized. SHA256SUMS lists the binaries. Install with: curl -fsSL https://statuspan.com/install.sh | sh"
+  "${notes_args[@]}"
 
 git fetch --tags origin
 echo "release ${TAG} published"

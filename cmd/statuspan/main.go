@@ -27,7 +27,7 @@ import (
 
 // version is reported by `statuspan version`. Release builds override it with
 // -ldflags "-X main.version=<semver>". Untagged local builds keep this default.
-var version = "0.2.0"
+var version = "0.3.0"
 
 // exitError carries a process exit code. A nil err means stay quiet.
 // Other errors still exit 1.

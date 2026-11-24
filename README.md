@@ -32,6 +32,22 @@ Wrap a recurring command with `statuspan run --recurring`. It posts nothing whil
 
 The relay in `relay/` is an optional Cloudflare Worker. Bots that are not on this machine post there. The daemon polls it and merges events into the local board. The same JSON body works for `POST /api/jobs` on the daemon and `POST /v1/w/<workspace>/jobs` on the relay.
 
+## Install
+
+The CLI installer works on macOS and Linux and installs to `~/.local/bin/statuspan`. No sudo.
+
+```bash
+curl -fsSL https://statuspan.com/install.sh | sh
+```
+
+### Mac app
+
+Download [StatusPan.dmg](https://github.com/kirillzubovsky/statuspan/releases/latest/download/StatusPan.dmg). StatusPan.app opens the local board in its own window. If nothing answers on `STATUSPAN_ADDR` (default `127.0.0.1:4477`), it starts the bundled `statuspan serve`. Quitting the app stops only a daemon it started.
+
+Build from source with `macos/build.sh` (for example `macos/build.sh 0.0.0-dev`). That writes `macos/.build/StatusPan.app` and `macos/.build/StatusPan.dmg`. See [macos/README.md](macos/README.md).
+
+The release attaches `StatusPan.dmg` along with the CLI binaries.
+
 ## Local only
 
 `make build` writes `./statuspan`. Defaults are `127.0.0.1:4477` and `~/Library/Application Support/statuspan` (`--addr` / `STATUSPAN_ADDR`, `--data` / `STATUSPAN_DATA`). Non-loopback addresses are refused.
