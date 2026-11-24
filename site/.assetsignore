@@ -3,3 +3,5 @@ wrangler.jsonc
 .assetsignore
 **/.DS_Store
 .wrangler/
+src/
+migrations/

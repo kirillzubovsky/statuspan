@@ -1,11 +1,23 @@
 {
-  // Marketing site. Static assets only: no Worker script.
+  // Marketing site: static assets plus a small Worker for the Cloud waitlist API.
   // Custom domains attach on the next deploy. This file does not deploy by itself.
+  // List waitlist signups (remote):
+  // wrangler d1 execute statuspan-waitlist --remote --command "SELECT id, created_at, name, email, company, users, comments FROM waitlist ORDER BY created_at DESC;"
   "name": "statuspan-site",
+  "main": "src/index.js",
   "compatibility_date": "2026-11-23",
   "assets": {
-    "directory": "."
+    "directory": ".",
+    "html_handling": "drop-trailing-slash",
+    "run_worker_first": ["/api/*"]
   },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "statuspan-waitlist",
+      "database_id": "50741eb0-c2ff-45f8-874d-f9addc4068fa"
+    }
+  ],
   "routes": [
     { "pattern": "statuspan.com", "custom_domain": true },
     { "pattern": "www.statuspan.com", "custom_domain": true }

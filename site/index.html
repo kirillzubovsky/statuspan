@@ -136,6 +136,8 @@ a:hover{text-decoration:underline}
 .top .inner,.wrap{max-width:1120px;margin:0 auto;padding:0 20px}
 .top .inner{width:100%;min-height:50px;display:flex;align-items:center;gap:14px}
 .top .live{margin-left:auto}
+.top .cloud{color:var(--text2)}
+.top .cloud:hover{color:var(--text);text-decoration:none}
 .word{font-size:12px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;white-space:nowrap}
 .word.failed{color:var(--failed)}.word.blocked{color:var(--blocked)}.word.stalled{color:var(--stalled)}.word.abandoned{color:var(--abandoned)}.word.running{color:var(--running)}.word.queued{color:var(--queued)}.word.done{color:var(--done)}
 .sh{display:flex;align-items:center;gap:8px;height:40px;margin:0;padding:0 20px;font-size:11.5px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--text3);background:color-mix(in srgb,var(--surf2) 70%,var(--bg));border-bottom:1px solid var(--border)}
@@ -177,6 +179,7 @@ code{font:inherit}
  .brow-h{display:none}
  .b-status{text-align:left}
  .top .live{display:none}
+ .top .cloud{margin-left:auto}
  .dl a{grid-template-columns:1fr}
 }
 </style>
@@ -186,6 +189,7 @@ code{font:inherit}
 <header class="top">
  <div class="inner">
   <a class="logo" href="/"><b></b>StatusPan</a>
+  <a class="cloud" href="/cloud">Cloud</a>
   <span class="live">Local board</span>
   <a class="btn" href="https://github.com/kirillzubovsky/statuspan">GitHub</a>
  </div>
@@ -235,7 +239,7 @@ code{font:inherit}
    </div>
    <div class="brow">
     <span class="b-title">Hosted</span>
-    <span class="b-detail">A paid version that runs the relay for you is coming soon. Self-host stays available.</span>
+    <span class="b-detail">A paid version that runs the relay for you is coming soon. Self-host stays available. <a href="/cloud">StatusPan Cloud — join the waitlist</a></span>
     <span class="b-status word queued">Soon</span>
    </div>
   </section>
@@ -346,7 +350,7 @@ statuspan run --agent "My Agent" --job build-1 -- make test</code></pre>
    <span class="logo"><b></b>StatusPan</span>
    <span>MIT</span>
    <a href="https://github.com/kirillzubovsky/statuspan">GitHub</a>
-   <span>Hosted relay, paid, coming soon.</span>
+   <a href="/cloud">StatusPan Cloud — join the waitlist</a>
   </footer>
  </div>
 </main>
