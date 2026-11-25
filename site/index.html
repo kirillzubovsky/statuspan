@@ -7,7 +7,7 @@
 <meta name="robots" content="index, follow">
 <meta name="color-scheme" content="dark">
 <meta name="theme-color" content="#1b1c20">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self' https://qed.am; style-src 'unsafe-inline'; script-src 'unsafe-inline' https://qed.am; connect-src https://qed.am; frame-src https://qed.am; base-uri 'none'; form-action 'none'">
 <title>StatusPan — which bot is working on what</title>
 <link rel="canonical" href="https://statuspan.com/">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
@@ -190,6 +190,16 @@ code{font:inherit}
  .top nav{gap:10px}
  .dl a{grid-template-columns:1fr}
 }
+/* QED's injected sheet caps .qed-card at 300px and the image at 140px. This slot is a wide 1200×628 picture on the board. */
+.sponsored-slot{margin:0;padding:12px 20px 16px}
+.sponsored-slot .qed-unit,
+.sponsored-slot .qed-unit.qed-card-unit,
+.sponsored-slot .qed-card{max-width:none;width:100%}
+.sponsored-slot .qed-card{display:block;border:1px solid var(--border);border-radius:10px;background:var(--bg);color:var(--text);text-decoration:none;overflow:hidden;font:13px/1.45 Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif}
+.sponsored-slot .qed-card:hover{color:var(--text);text-decoration:none}
+.sponsored-slot .qed-card img{display:block;width:100%;height:auto;aspect-ratio:1200 / 628;object-fit:cover;background:var(--surf2)}
+.sponsored-slot .qed-by{color:var(--text3);font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif}
+.sponsored-slot .qed-by:hover{color:var(--text2)}
 </style>
 </head>
 <body>
@@ -305,6 +315,14 @@ statuspan run --agent "My Agent" --job hello -- sleep 5</code></pre>
     <p>As a backup, you can always use the URL with plain curl, as long as the URL is the one where StatusPan is actually running.</p>
     <pre><code>curl -s -X POST "${STATUSPAN_URL:-http://127.0.0.1:4477/api/jobs}" -H 'Content-Type: application/json' -d '{"agent":"My Agent","job_id":"build-1","state":"running","progress":40}'</code></pre>
     <p>Reload the board. My Agent / build-1 shows as running.</p>
+   </div>
+  </section>
+
+  <section class="panel sponsored" aria-labelledby="sponsored">
+   <h2 class="sh" id="sponsored">Sponsored</h2>
+   <div class="sponsored-slot">
+    <div data-qed-slot="statuspan-download"></div>
+    <script async src="https://qed.am/e.js"></script>
    </div>
   </section>
 
