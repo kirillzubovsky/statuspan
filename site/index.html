@@ -152,8 +152,11 @@ a.btn.primary:hover{background:var(--stalled);filter:brightness(1.08)}
 .sh{display:flex;align-items:center;gap:8px;height:40px;margin:0;padding:0 20px;font-size:11.5px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--text3);background:color-mix(in srgb,var(--surf2) 70%,var(--bg));border-bottom:1px solid var(--border)}
 .panel{background:var(--surf);border-top:1px solid var(--border);border-bottom:1px solid var(--border);margin:18px 0}
 .hero{padding:36px 0 8px}
-.hero h1{margin:0;max-width:18ch;font-size:40px;line-height:1.08;font-weight:650;letter-spacing:-.03em}
+.hero h1{margin:0;max-width:none;font-size:40px;line-height:1.08;font-weight:650;letter-spacing:-.03em;text-wrap:balance}
+.hero-sub{margin:12px 0 0;max-width:40em;font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;font-size:22px;font-weight:500;line-height:1.3;letter-spacing:-.015em;color:var(--text);text-wrap:balance}
 .lede{max-width:68ch;margin:14px 0 0;color:var(--text2);font-size:15px;line-height:1.5}
+.callout{margin:28px 0 6px;padding:28px 24px;text-align:center;background:var(--surf);border:1px solid var(--border);border-radius:12px}
+.callout p{margin:0;font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;font-size:26px;font-weight:600;line-height:1.25;letter-spacing:-.02em;color:var(--text);text-wrap:balance}
 .shot{margin:22px 0 0}
 .shot img{display:block;width:100%;height:auto;border:1px solid var(--border);border-radius:10px;background:var(--surf)}
 .brow{display:grid;grid-template-columns:168px minmax(0,1fr) 132px;align-items:center;column-gap:16px;min-height:48px;padding:10px 20px;border-bottom:1px solid var(--border);font-size:14px}
@@ -179,11 +182,15 @@ code{font:inherit}
 .foot{display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center;padding:22px 0 40px;color:var(--text3);font-size:12px}
 .foot a{color:var(--text2)}
 @media (min-width:721px){
+ .hero h1{max-width:none;font-size:clamp(40px, 3.6vw, 44px);letter-spacing:-.03em}
  .brow.ask{grid-template-columns:minmax(180px,280px) minmax(0,1fr) 132px}
  .brow.ask:not(.brow-h){align-items:start;padding-top:14px;padding-bottom:14px}
 }
 @media (max-width:720px){
- .hero h1{font-size:32px}
+ .hero h1{font-size:32px;letter-spacing:-.03em}
+ .hero-sub{font-size:18px}
+ .callout{margin:22px 0 4px;padding:22px 16px}
+ .callout p{font-size:22px}
  .brow,.steps li{grid-template-columns:1fr;gap:4px;align-items:start}
  .brow-h{display:none}
  .b-status{text-align:left}
@@ -218,6 +225,7 @@ code{font:inherit}
  <div class="wrap">
   <section class="hero">
    <h1>Which bot is working on what.</h1>
+   <h2 class="hero-sub">Effortlessly keep accurate tabs on your AI workflows</h2>
    <p class="lede">StatusPan is an open-source, super fast control panel for AI agents. One local Go binary draws an airport departures board. Bots push one way, with one curl. A running job that goes quiet is stalled, then abandoned. A Cloudflare relay is optional if you want to self-host it. A hosted paid version is coming soon.</p>
    <!-- Re-enable when v0.3.0 is published with StatusPan.dmg:
    <p class="hero-more"><a href="https://github.com/kirillzubovsky/statuspan/releases/latest/download/StatusPan.dmg">Download for Mac</a></p>
@@ -226,6 +234,10 @@ code{font:inherit}
     <img src="airport-night.png" width="2560" height="1324" alt="StatusPan night board, an airport-style list of fictional bots, jobs, and statuses" fetchpriority="high" decoding="async">
    </figure>
   </section>
+
+  <div class="callout">
+   <p>Stop checking endless Terminals</p>
+  </div>
 
   <section class="panel" aria-labelledby="what">
    <h2 class="sh" id="what">What it is</h2>
