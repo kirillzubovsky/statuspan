@@ -69,6 +69,14 @@
       "mainEntity": [
         {
           "@type": "Question",
+          "name": "Can I see agents on other machines?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Yes. StatusPan works well when your agents run across different environments — your laptop, servers, GPU boxes, and cloud agents — and you want one report of who's where and what they're doing. Remote machines post through the relay (https://statuspan.com/relay), and each update is stamped with the token, IP, and country that sent it, so you know where it really came from."
+          }
+        },
+        {
+          "@type": "Question",
           "name": "How does an agent post a job?",
           "acceptedAnswer": {
             "@type": "Answer",
@@ -241,7 +249,7 @@ code{font:inherit}
  <div class="wrap">
   <section class="hero">
    <h1>Which bot is working on what.</h1>
-   <h2 class="hero-sub">Effortlessly keep accurate tabs on your AI workflows</h2>
+   <h2 class="hero-sub">Effortlessly keep accurate tabs on your distributed AI workflows</h2>
    <p class="lede">StatusPan is an open-source, super fast control panel for AI agents. One local Go binary draws an airport departures board. Bots push one way, with one curl. A running job that goes quiet is stalled, then abandoned. A Cloudflare relay is optional if you want to self-host it. A hosted paid version is coming soon.</p>
    <!-- Re-enable when v0.3.0 is published with StatusPan.dmg:
    <p class="hero-more"><a href="https://github.com/kirillzubovsky/statuspan/releases/latest/download/StatusPan.dmg">Download for Mac</a></p>
@@ -377,6 +385,11 @@ statuspan run --agent "My Agent" --job hello -- sleep 5</code></pre>
   <section class="panel" aria-labelledby="faq">
    <h2 class="sh" id="faq">FAQ</h2>
    <div class="brow brow-h ask" aria-hidden="true"><span>Question</span><span>Answer</span><span>Status</span></div>
+   <div class="brow ask">
+    <span class="b-title">Can I see agents on other machines?</span>
+    <span class="b-detail">Yes. StatusPan works well when your agents run across different environments — your laptop, servers, GPU boxes, and cloud agents — and you want one report of who's where and what they're doing. Remote machines post through the <a href="/relay">relay</a>, and each update is stamped with the token, IP, and country that sent it, so you know where it really came from.</span>
+    <span class="b-status word running">Relay</span>
+   </div>
    <div class="brow ask">
     <span class="b-title">How does an agent post a job?</span>
     <span class="b-detail">Use <span class="mono">statuspan post</span> (or <span class="mono">statuspan run</span>). The CLI posts to the relay when <span class="mono">STATUSPAN_RELAY_URL</span>, <span class="mono">STATUSPAN_RELAY_WORKSPACE</span>, and <span class="mono">STATUSPAN_TOKEN_FILE</span> are set, and to the local daemon otherwise. As a backup, you can always use the URL with plain curl, as long as the URL is the one where StatusPan is actually running. A new job needs agent, job_id, and state: queued, running, blocked, done, or failed. Later posts may omit state. The local daemon has no auth.</span>
