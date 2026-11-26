@@ -7,11 +7,83 @@ description: "Post job status to a local or self-hosted StatusPan board so a per
 
 StatusPan is a local airport-style board. You push. It does not call you back. The local daemon has no auth and listens only on loopback (`127.0.0.1:4477`). Another machine posts to a self-hosted relay instead.
 
+## Install and run
+
+Do these steps in order. This is enough to install StatusPan, start the board, and post a first job.
+
+1. Install the CLI (macOS or Linux):
+
+```bash
+curl -fsSL https://statuspan.com/install.sh | sh
+```
+
+The installer puts the binary in `/usr/local/bin` when you are root or that directory is writable, otherwise in `~/.local/bin`. It does not edit your shell rc files.
+
+2. Make sure `statuspan` is on PATH:
+
+```bash
+command -v statuspan
+```
+
+If that prints nothing, add the install directory to PATH, or call the binary by the full path the installer printed:
+
+```bash
+export PATH="/usr/local/bin:$HOME/.local/bin:$PATH"
+command -v statuspan
+# or run it by full path, for example:
+#   ~/.local/bin/statuspan serve
+#   /usr/local/bin/statuspan serve
+```
+
+To keep PATH for new shells, append that `export` line to `~/.bashrc` or `~/.zshrc`. Do not skip this check. `statuspan: command not found` means the install directory is not on PATH.
+
+3. Start the board in the background. It listens only on loopback. The default address is `127.0.0.1:4477`. To use another loopback port (for example if 4477 is already taken), set `STATUSPAN_ADDR`. You can also set `STATUSPAN_DATA` to a separate data directory (default `~/.config/statuspan`):
+
+```bash
+export STATUSPAN_ADDR=127.0.0.1:4477
+# throwaway port example: export STATUSPAN_ADDR=127.0.0.1:14477
+statuspan serve &
+```
+
+`statuspan serve --addr 127.0.0.1:14477` is the same as setting `STATUSPAN_ADDR`. Leave the process running.
+
+4. Health-check the board. If the connection is refused, wait a second and try again until you get JSON with a `jobs` array (empty is fine):
+
+```bash
+curl -s "http://${STATUSPAN_ADDR:-127.0.0.1:4477}/api/jobs"
+```
+
+Then open the board at `http://127.0.0.1:4477`, or at whatever host:port you set in `STATUSPAN_ADDR`.
+
+5. Post a test job. If you set `STATUSPAN_ADDR`, `statuspan post` uses it automatically. You can also pass `--addr 127.0.0.1:14477`.
+
+```bash
+statuspan post --agent "My Agent" --job hello --state running --note "first post"
+```
+
+6. Confirm it shows on the board. Reload the page, or:
+
+```bash
+curl -s "http://${STATUSPAN_ADDR:-127.0.0.1:4477}/api/jobs"
+statuspan ls
+```
+
+You should see My Agent / hello as running.
+
+7. Install the agent skill so later sessions can post without this guide:
+
+```bash
+statuspan agent install
+```
+
+8. Optional: if this machine is not the one running the board, connect it to your relay instead of posting to localhost. See [Connect another machine to your relay](#connect-another-machine-to-your-relay) below, or <https://statuspan.com/relay>.
+
+
 The board is optional. A failed, slow, or unreachable StatusPan must never block, delay, or fail the real work. Time out in about 2 seconds and ignore errors (`curl --max-time 2 ... || true`).
 
 Full detail: <https://statuspan.com/llms-full.txt>. Machine-readable: `statuspan agent json`. This file is enough to post correctly.
 
-On a Mac, [StatusPan.dmg](https://github.com/kirillzubovsky/statuspan/releases/latest/download/StatusPan.dmg) is a WKWebView window on the local board. It starts the bundled `statuspan serve` if nothing answers on `STATUSPAN_ADDR` (default `127.0.0.1:4477`), and it stops only a daemon it started. The CLI install, on macOS and Linux, is `curl -fsSL https://statuspan.com/install.sh | sh`, which installs to `~/.local/bin/statuspan`.
+On a Mac, [StatusPan.dmg](https://github.com/kirillzubovsky/statuspan/releases/latest/download/StatusPan.dmg) is a WKWebView window on the local board. It starts the bundled `statuspan serve` if nothing answers on `STATUSPAN_ADDR` (default `127.0.0.1:4477`), and it stops only a daemon it started.
 
 ## What belongs on the board
 
@@ -156,6 +228,52 @@ chmod 600 write-token read-token
 ```
 
 A write token posts for one agent and cannot read the board. A read token feeds the board and cannot post. The admin token creates workspaces and mints, lists, and revokes tokens. Never give it to bots. Point the daemon at the relay with `relay.json` (macOS: `~/Library/Application Support/statuspan/relay.json`) or `STATUSPAN_RELAY_URL`, `STATUSPAN_RELAY_WORKSPACE`, and `STATUSPAN_RELAY_READ_TOKEN`. Agents post with `STATUSPAN_RELAY_URL`, `STATUSPAN_RELAY_WORKSPACE`, and `STATUSPAN_TOKEN_FILE` (or `STATUSPAN_TOKEN`).
+
+## Connect another machine to your relay
+
+Use this when a second computer, a cloud agent, or CI should post to the same board. Those agents cannot reach `127.0.0.1` on the machine that runs the board.
+
+Token roles:
+
+| Token | Role |
+| --- | --- |
+| write | Per machine or agent. Post only. Cannot read the board. |
+| read | Local daemon and board only. Cannot post. |
+| admin | Mint and revoke tokens, create workspaces. Never give it to bots. |
+
+1. On the machine that has the admin token, from `relay/`:
+
+```bash
+export RELAY_URL="https://<your-relay>.workers.dev"
+export ADMIN_TOKEN=$(cat admin-token)
+node scripts/admin.mjs mint <workspace> --kind write --agent <agent-name> --label <machine-label> --out write-token
+```
+
+The command is `node scripts/admin.mjs mint <workspace> --kind read|write [--agent <name>] [--label <label>] [--out <path>]`. A write token requires `--agent`. `--label` is optional and should name the machine. `--out` writes only the token (mode 0600) and prints `saved to <path>`. The token is scoped to that agent name; posts from the new machine must use the same `--agent`. `RELAY_URL` and `ADMIN_TOKEN` come from the environment, or `--relay-url` / `--admin-token-file`.
+
+2. On the new machine, save the token to `~/.config/statuspan/token` (`chmod 600`). Never put the token in shell history or chat. Prefer copying the file minted with `--out`, or pasting it into an editor. Do not `echo` the token on the command line.
+
+```bash
+mkdir -p ~/.config/statuspan
+# copy write-token onto the new machine as ~/.config/statuspan/token
+chmod 600 ~/.config/statuspan/token
+```
+
+3. On the new machine, set these and persist them in your shell rc (`~/.bashrc` or `~/.zshrc`):
+
+```bash
+export STATUSPAN_RELAY_URL="https://<your-relay>.workers.dev"
+export STATUSPAN_RELAY_WORKSPACE="<workspace>"
+export STATUSPAN_TOKEN_FILE="$HOME/.config/statuspan/token"
+```
+
+4. Verify. Post a test job (the agent name must match the token) and check the local board within a few seconds:
+
+```bash
+statuspan post --agent "<agent-name>" --job connect-test --state running --note "from the new machine"
+```
+
+Then look for that job on the board, or `curl -s "http://${STATUSPAN_ADDR:-127.0.0.1:4477}/api/jobs"`.
 
 ## More
 

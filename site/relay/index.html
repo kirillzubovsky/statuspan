@@ -191,18 +191,66 @@ chmod 600 write-token read-token</code></pre>
    <div class="brow brow-h" aria-hidden="true"><span>Token</span><span>What it can do</span><span>Role</span></div>
    <div class="brow">
     <span class="b-title">Write token</span>
-    <span class="b-detail">Belongs to one agent. Post-only. It cannot read the board.</span>
+    <span class="b-detail">Per machine or agent. Post-only. It cannot read the board.</span>
     <span class="b-status word running">Post</span>
    </div>
    <div class="brow">
     <span class="b-title">Read token</span>
-    <span class="b-detail">Feeds the board (list, poll, and stream). It cannot post.</span>
+    <span class="b-detail">For the local daemon and board only (list, poll, and stream). It cannot post.</span>
     <span class="b-status word done">Board</span>
    </div>
    <div class="brow">
     <span class="b-title">Admin token</span>
-    <span class="b-detail">Creates workspaces and mints, lists, and revokes tokens. Never give it to bots.</span>
+    <span class="b-detail">Creates workspaces and mints or revokes tokens. Never give it to bots.</span>
     <span class="b-status word blocked">Admin</span>
+   </div>
+  </section>
+
+
+  <section class="panel" aria-labelledby="connect">
+   <h2 class="sh" id="connect">Connect another machine to your relay</h2>
+   <ol class="steps">
+    <li>
+     <span class="n">01</span>
+     <div>
+      <b>Mint a write token on the admin machine</b>
+      <p>From <span class="mono">relay/</span>, on the machine that has the admin token. A write token requires <span class="mono">--agent</span>. <span class="mono">--label</span> should name the new machine. <span class="mono">--out</span> writes only the token (mode 0600). The token is scoped to that agent name; posts from the new machine must use the same <span class="mono">--agent</span>.</p>
+      <pre><code>export RELAY_URL="https://&lt;your-relay&gt;.workers.dev"
+export ADMIN_TOKEN=$(cat admin-token)
+node scripts/admin.mjs mint &lt;workspace&gt; --kind write --agent &lt;agent-name&gt; --label &lt;machine-label&gt; --out write-token</code></pre>
+     </div>
+    </li>
+    <li>
+     <span class="n">02</span>
+     <div>
+      <b>Save the token on the new machine</b>
+      <p>Write it to <span class="mono">~/.config/statuspan/token</span> and <span class="mono">chmod 600</span>. Never put the token in shell history or chat. Prefer copying the file minted with <span class="mono">--out</span>, or pasting it into an editor.</p>
+      <pre><code>mkdir -p ~/.config/statuspan
+# copy write-token onto the new machine as ~/.config/statuspan/token
+chmod 600 ~/.config/statuspan/token</code></pre>
+     </div>
+    </li>
+    <li>
+     <span class="n">03</span>
+     <div>
+      <b>Point the new machine at the relay</b>
+      <p>Set these and persist them in your shell rc (<span class="mono">~/.bashrc</span> or <span class="mono">~/.zshrc</span>).</p>
+      <pre><code>export STATUSPAN_RELAY_URL="https://&lt;your-relay&gt;.workers.dev"
+export STATUSPAN_RELAY_WORKSPACE="&lt;workspace&gt;"
+export STATUSPAN_TOKEN_FILE="$HOME/.config/statuspan/token"</code></pre>
+     </div>
+    </li>
+    <li>
+     <span class="n">04</span>
+     <div>
+      <b>Post a test job and check the board</b>
+      <p>The agent name must match the token. The job should appear on the local board within a few seconds.</p>
+      <pre><code>statuspan post --agent "&lt;agent-name&gt;" --job connect-test --state running --note "from the new machine"</code></pre>
+     </div>
+    </li>
+   </ol>
+   <div class="note">
+    <p>Token roles are listed below: a write token is per machine or agent and can only post; a read token is for the local daemon and board only; the admin token mints and revokes and must never be given to bots.</p>
    </div>
   </section>
 

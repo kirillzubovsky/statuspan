@@ -1,7 +1,12 @@
 #!/bin/sh
-# Install StatusPan into $STATUSPAN_BIN_DIR (default: $HOME/.local/bin). No sudo.
+# Install the StatusPan CLI.
+#
+# Default destination:
+#   /usr/local/bin  when running as root, or when that directory is writable
+#   $HOME/.local/bin  otherwise
+# Override with STATUSPAN_BIN_DIR.
 # Tests can point STATUSPAN_RELEASE_BASE at a local file server.
-# STATUSPAN_BIN_DIR chooses the install directory.
+# This script does not edit shell rc files.
 
 set -eu
 
@@ -12,11 +17,6 @@ cleanup() {
   fi
 }
 trap cleanup EXIT
-
-if [ -z "${HOME:-}" ]; then
-  printf '%s\n' "statuspan: HOME is not set" >&2
-  exit 1
-fi
 
 base="${STATUSPAN_RELEASE_BASE:-https://github.com/kirillzubovsky/statuspan/releases/latest/download}"
 base="${base%/}"
@@ -42,9 +42,29 @@ case "$mach" in
     ;;
 esac
 
+if [ -n "${STATUSPAN_BIN_DIR:-}" ]; then
+  dest=$STATUSPAN_BIN_DIR
+elif [ "$(id -u)" -eq 0 ] || [ -w /usr/local/bin ]; then
+  dest=/usr/local/bin
+else
+  if [ -z "${HOME:-}" ]; then
+    printf '%s\n' "statuspan: HOME is not set" >&2
+    exit 1
+  fi
+  dest="${HOME}/.local/bin"
+fi
+
+while [ "$dest" != "/" ] && [ "${dest%/}" != "$dest" ]; do
+  dest=${dest%/}
+done
+
+if [ -z "$dest" ]; then
+  printf '%s\n' "statuspan: install directory is empty" >&2
+  exit 1
+fi
+
 name="statuspan-${os}-${arch}"
 url="${base}/${name}"
-dest="${STATUSPAN_BIN_DIR:-${HOME}/.local/bin}"
 bin="${dest}/statuspan"
 
 mkdir -p "$dest"
@@ -77,13 +97,33 @@ mv -f "$tmp" "$bin"
 tmp=""
 chmod +x "$bin"
 
-printf '%s\n' "Installed ${bin}" "" "Next:" "  statuspan serve" "  open http://localhost:4477"
-
+cmd=statuspan
+path_ok=0
 case ":${PATH}:" in
-  *":${dest}:"*) ;;
-  *)
-    printf '%s\n' "" "${dest} is not on PATH. Add it with:" "  export PATH=\"${dest}:\$PATH\""
-    ;;
+  *":${dest}:"*) path_ok=1 ;;
 esac
 
-printf '%s\n' "" "AI agents: run 'statuspan agent' for instructions, or 'statuspan agent install' to install the skill."
+printf '%s\n' "Installed ${bin}" ""
+
+if [ "$path_ok" -eq 0 ]; then
+  cmd=$bin
+  rc_name="~/.bashrc"
+  case "${SHELL:-}" in
+    */zsh) rc_name="~/.zshrc" ;;
+    */bash) rc_name="~/.bashrc" ;;
+  esac
+  printf '%s\n' \
+    "${dest} is not on PATH. Add it for this shell with:" \
+    "  export PATH=\"${dest}:\$PATH\"" \
+    "" \
+    "To keep it for new shells, append that line to ${rc_name}:" \
+    "  echo 'export PATH=\"${dest}:\$PATH\"' >> ${rc_name}" \
+    "" \
+    "Or run the binary by its full path right now:" \
+    "  ${bin} agent install" \
+    ""
+fi
+
+printf '%s\n' "Next:" "  ${cmd} serve" "  open http://localhost:4477" \
+  "" \
+  "AI agents: run '${cmd} agent' for instructions, or '${cmd} agent install' to install the skill."

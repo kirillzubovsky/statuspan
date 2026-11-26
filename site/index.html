@@ -197,16 +197,19 @@ code{font:inherit}
  .top nav{gap:10px}
  .dl a{grid-template-columns:1fr}
 }
-/* QED's injected sheet caps .qed-card at 300px and the image at 140px. This slot is a wide 1200×628 picture on the board. */
+/* QED's injected sheet caps .qed-card at 300px and the image at 140px. This slot is a compact thumbnail-plus-text row. */
 .sponsored-slot{margin:0;padding:12px 20px 16px}
-.sponsored-slot .qed-unit,
-.sponsored-slot .qed-unit.qed-card-unit,
-.sponsored-slot .qed-card{max-width:none;width:100%}
-.sponsored-slot .qed-card{display:block;border:1px solid var(--border);border-radius:10px;background:var(--bg);color:var(--text);text-decoration:none;overflow:hidden;font:13px/1.45 Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif}
+.sponsored-slot .qed-unit,.sponsored-slot .qed-unit.qed-card-unit,.sponsored-slot .qed-card{max-width:none;width:100%;max-height:none}
+.sponsored-slot .qed-card{display:flex;align-items:center;gap:12px;padding:10px;border:1px solid var(--border);border-radius:10px;background:var(--bg);color:var(--text);text-decoration:none;overflow:hidden;font:13px/1.45 Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif}
 .sponsored-slot .qed-card:hover{color:var(--text);text-decoration:none}
-.sponsored-slot .qed-card img{display:block;width:100%;height:auto;aspect-ratio:1200 / 628;object-fit:cover;background:var(--surf2)}
+.sponsored-slot .qed-card .qed-media{flex:0 0 120px;width:120px;height:63px;max-height:none;aspect-ratio:auto;margin:0;border-radius:6px;overflow:hidden;background:var(--surf2)}
+.sponsored-slot .qed-card .qed-media img{width:100%;height:100%;max-height:none;aspect-ratio:auto;object-fit:cover}
+.sponsored-slot .qed-card .qed-body{flex:1 1 auto;min-width:0;padding:0}
 .sponsored-slot .qed-by{color:var(--text3);font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif}
 .sponsored-slot .qed-by:hover{color:var(--text2)}
+@media (max-width:420px){
+ .sponsored-slot .qed-card .qed-media{flex-basis:96px;width:96px;height:50px}
+}
 </style>
 </head>
 <body>
@@ -287,7 +290,8 @@ code{font:inherit}
      <div>
       <b>Install</b>
       <pre><code>curl -fsSL https://statuspan.com/install.sh | sh</code></pre>
-      <p>The script detects your OS and architecture, downloads the release binary, and installs it to <span class="mono">~/.local/bin</span>. No sudo.</p>
+      <p>The script detects your OS and architecture and installs the release binary to <span class="mono">/usr/local/bin</span> when you are root or that directory is writable, otherwise to <span class="mono">~/.local/bin</span>. After install, run <span class="mono">command -v statuspan</span>. If nothing is found, add the install directory to PATH or call the binary by its full path.</p>
+      <pre><code>command -v statuspan || export PATH="/usr/local/bin:$HOME/.local/bin:$PATH"</code></pre>
      </div>
     </li>
     <li>
@@ -345,7 +349,7 @@ statuspan run --agent "My Agent" --job hello -- sleep 5</code></pre>
     <p class="dl-cta"><a class="btn primary" href="https://github.com/kirillzubovsky/statuspan/releases/latest/download/StatusPan.dmg">Download for Mac</a></p>
     -->
     <p>StatusPan.app opens your board in its own window and starts the bundled daemon if one isn't already running. Universal (Apple silicon and Intel), macOS 12 or later, signed and notarized.</p>
-    <p>Install the CLI. It works on macOS and Linux and installs to <span class="mono">~/.local/bin/statuspan</span>.</p>
+    <p>Install the CLI. It works on macOS and Linux. The installer puts the binary in <span class="mono">/usr/local/bin</span> when you are root or that directory is writable, otherwise in <span class="mono">~/.local/bin</span>. After install, run <span class="mono">command -v statuspan</span>. If nothing is found, add the install directory to PATH or call the binary by its full path, for example <span class="mono">~/.local/bin/statuspan</span>.</p>
     <pre><code>curl -fsSL https://statuspan.com/install.sh | sh</code></pre>
     <p class="faint dl-all">All release files: <a href="https://github.com/kirillzubovsky/statuspan/releases/latest">github.com/kirillzubovsky/statuspan/releases/latest</a></p>
    </div>
