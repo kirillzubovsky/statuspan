@@ -19,20 +19,24 @@ const logName = "events.jsonl"
 // the same seq and merge rules. Snapshots store the full merged job so compaction
 // can drop older lines without losing fields set before the history window.
 type logRecord struct {
-	Kind     string    `json:"kind"`
-	N        int64     `json:"n,omitempty"`
-	TS       time.Time `json:"ts,omitempty"`
-	Agent    string    `json:"agent,omitempty"`
-	JobID    string    `json:"job_id,omitempty"`
-	Title    *string   `json:"title,omitempty"`
-	State    string    `json:"state,omitempty"`
-	Progress *int      `json:"progress,omitempty"`
-	Link     *string   `json:"link,omitempty"`
-	Seq      *int64    `json:"seq,omitempty"`
-	TTL      *int      `json:"ttl,omitempty"`
-	Note     *string   `json:"note,omitempty"`
-	Job      *snapJob  `json:"job,omitempty"`
-	Events   []Event   `json:"events,omitempty"`
+	Kind       string    `json:"kind"`
+	N          int64     `json:"n,omitempty"`
+	TS         time.Time `json:"ts,omitempty"`
+	Agent      string    `json:"agent,omitempty"`
+	JobID      string    `json:"job_id,omitempty"`
+	Title      *string   `json:"title,omitempty"`
+	State      string    `json:"state,omitempty"`
+	Progress   *int      `json:"progress,omitempty"`
+	Link       *string   `json:"link,omitempty"`
+	Seq        *int64    `json:"seq,omitempty"`
+	TTL        *int      `json:"ttl,omitempty"`
+	Note       *string   `json:"note,omitempty"`
+	Via        string    `json:"via,omitempty"`
+	IP         string    `json:"ip,omitempty"`
+	Country    string    `json:"country,omitempty"`
+	ReceivedAt string    `json:"received_at,omitempty"`
+	Job        *snapJob  `json:"job,omitempty"`
+	Events     []Event   `json:"events,omitempty"`
 }
 
 type snapJob struct {
@@ -45,6 +49,10 @@ type snapJob struct {
 	Seq        *int64     `json:"seq,omitempty"`
 	TTL        int        `json:"ttl"`
 	Note       string     `json:"note,omitempty"`
+	Via        string     `json:"via,omitempty"`
+	IP         string     `json:"ip,omitempty"`
+	Country    string     `json:"country,omitempty"`
+	ReceivedAt string     `json:"received_at,omitempty"`
 	StartedAt  time.Time  `json:"started_at"`
 	UpdatedAt  time.Time  `json:"updated_at"`
 	FinishedAt *time.Time `json:"finished_at,omitempty"`
@@ -211,18 +219,22 @@ func (s *Store) restore(snap snapJob) {
 		s.remember(hist[i])
 	}
 	job := &jobState{
-		agent:     snap.Agent,
-		jobID:     snap.JobID,
-		title:     snap.Title,
-		state:     snap.State,
-		progress:  snap.Progress,
-		link:      snap.Link,
-		ttl:       snap.TTL,
-		note:      snap.Note,
-		hasSeq:    snap.Seq != nil,
-		startedAt: utc(snap.StartedAt),
-		updatedAt: utc(snap.UpdatedAt),
-		history:   hist,
+		agent:      snap.Agent,
+		jobID:      snap.JobID,
+		title:      snap.Title,
+		state:      snap.State,
+		progress:   snap.Progress,
+		link:       snap.Link,
+		ttl:        snap.TTL,
+		note:       snap.Note,
+		via:        snap.Via,
+		ip:         snap.IP,
+		country:    snap.Country,
+		receivedAt: snap.ReceivedAt,
+		hasSeq:     snap.Seq != nil,
+		startedAt:  utc(snap.StartedAt),
+		updatedAt:  utc(snap.UpdatedAt),
+		history:    hist,
 	}
 	if snap.Seq != nil {
 		job.seq = *snap.Seq
@@ -424,31 +436,39 @@ func syncDir(dir string) error {
 
 func recordFromUpdate(u Update, n int64, ts time.Time) logRecord {
 	return logRecord{
-		Kind:     "update",
-		N:        n,
-		TS:       ts,
-		Agent:    u.Agent,
-		JobID:    u.JobID,
-		Title:    u.Title,
-		State:    u.State,
-		Progress: u.Progress,
-		Link:     u.Link,
-		Seq:      u.Seq,
-		TTL:      u.TTL,
-		Note:     u.Note,
+		Kind:       "update",
+		N:          n,
+		TS:         ts,
+		Agent:      u.Agent,
+		JobID:      u.JobID,
+		Title:      u.Title,
+		State:      u.State,
+		Progress:   u.Progress,
+		Link:       u.Link,
+		Seq:        u.Seq,
+		TTL:        u.TTL,
+		Note:       u.Note,
+		Via:        u.Via,
+		IP:         u.IP,
+		Country:    u.Country,
+		ReceivedAt: u.ReceivedAt,
 	}
 }
 
 func (r logRecord) toUpdate() Update {
 	return Update{
-		Agent:    r.Agent,
-		JobID:    r.JobID,
-		Title:    r.Title,
-		State:    r.State,
-		Progress: r.Progress,
-		Link:     r.Link,
-		Seq:      r.Seq,
-		TTL:      r.TTL,
-		Note:     r.Note,
+		Agent:      r.Agent,
+		JobID:      r.JobID,
+		Title:      r.Title,
+		State:      r.State,
+		Progress:   r.Progress,
+		Link:       r.Link,
+		Seq:        r.Seq,
+		TTL:        r.TTL,
+		Note:       r.Note,
+		Via:        r.Via,
+		IP:         r.IP,
+		Country:    r.Country,
+		ReceivedAt: r.ReceivedAt,
 	}
 }

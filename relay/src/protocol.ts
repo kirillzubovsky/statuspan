@@ -42,6 +42,10 @@ export type JobRow = {
   started_at: string;
   updated_at: string;
   finished_at: string | null;
+  via: string;
+  ip: string;
+  country: string;
+  received_at: string;
 };
 
 export type EventRow = {
@@ -59,6 +63,10 @@ export type EventRow = {
   has_seq: number;
   seq: number | null;
   kind: string;
+  via: string;
+  ip: string;
+  country: string;
+  received_at: string;
 };
 
 export function parseUpdates(text: string): { updates: ParsedUpdate[] } | { error: string } {
@@ -102,6 +110,8 @@ function parseOne(value: unknown): { update: ParsedUpdate } | { error: string } 
   ) {
     return { error: "invalid json" };
   }
+  // via, ip, country, and received_at are stamped by the worker. A client
+  // value with one of those names is ignored on purpose.
   const update: ParsedUpdate = {
     agent: agent.value,
     jobId: jobId.value,
@@ -187,6 +197,10 @@ export function freshJob(u: ParsedUpdate, ts: string): JobRow {
     started_at: ts,
     updated_at: ts,
     finished_at: null,
+    via: "",
+    ip: "",
+    country: "",
+    received_at: "",
   };
 }
 
@@ -206,7 +220,18 @@ export function toEventJson(row: EventRow): Record<string, unknown> {
   if (row.title !== "") out.title = row.title;
   if (row.link !== "") out.link = row.link;
   if (row.has_seq === 1) out.seq = row.seq;
+  putProvenance(out, row);
   return out;
+}
+
+function putProvenance(
+  out: Record<string, unknown>,
+  stamp: { via: string; ip: string; country: string; received_at: string },
+): void {
+  if (stamp.via !== "") out.via = stamp.via;
+  if (stamp.ip !== "") out.ip = stamp.ip;
+  if (stamp.country !== "") out.country = stamp.country;
+  if (stamp.received_at !== "") out.received_at = stamp.received_at;
 }
 
 export function toJobJson(job: JobRow, history: EventRow[], nowMs: number): Record<string, unknown> {
@@ -230,6 +255,7 @@ export function toJobJson(job: JobRow, history: EventRow[], nowMs: number): Reco
   if (job.note !== "") out.note = job.note;
   if (job.has_seq === 1) out.seq = job.seq;
   if (job.finished_at !== null) out.finished_at = job.finished_at;
+  putProvenance(out, job);
   return out;
 }
 

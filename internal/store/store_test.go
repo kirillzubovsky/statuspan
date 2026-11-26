@@ -1587,6 +1587,92 @@ func TestClearSection(t *testing.T) {
 	})
 }
 
+func TestProvenanceLatestAppliedAndOldLog(t *testing.T) {
+	dir := t.TempDir()
+	s, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seq := int64(2)
+	applied, err := s.Apply(Update{
+		Agent: "ci", JobID: "build-1", State: "running", Seq: &seq,
+		Via: "ci-builder", IP: "203.0.113.10", Country: "US",
+		ReceivedAt: "2026-11-26T12:00:00.000Z",
+	})
+	if err != nil || !applied {
+		t.Fatalf("apply %v %v", applied, err)
+	}
+	job, ok := s.Get("ci", "build-1")
+	if !ok || job.Via != "ci-builder" || job.IP != "203.0.113.10" || job.Country != "US" || job.ReceivedAt != "2026-11-26T12:00:00.000Z" {
+		t.Fatalf("%+v ok=%v", job, ok)
+	}
+	if len(job.History) != 1 || job.History[0].Via != "ci-builder" || job.History[0].IP != "203.0.113.10" || job.History[0].Country != "US" {
+		t.Fatalf("history %+v", job.History)
+	}
+
+	older := int64(1)
+	applied, err = s.Apply(Update{
+		Agent: "ci", JobID: "build-1", State: "failed", Seq: &older,
+		Via: "other", IP: "198.51.100.1", Country: "ZZ", ReceivedAt: "1999-01-01T00:00:00.000Z",
+	})
+	if err != nil || applied {
+		t.Fatalf("older seq applied=%v err=%v", applied, err)
+	}
+	job, _ = s.Get("ci", "build-1")
+	if job.Via != "ci-builder" || job.IP != "203.0.113.10" || job.State != "running" {
+		t.Fatalf("stamp moved %+v", job)
+	}
+	last := job.History[len(job.History)-1]
+	if last.Applied || last.Via != "other" || last.IP != "198.51.100.1" {
+		t.Fatalf("unapplied event %+v", last)
+	}
+
+	if _, err := s.Apply(Update{Agent: "ci", JobID: "build-1", State: "running", Via: "local"}); err != nil {
+		t.Fatal(err)
+	}
+	job, _ = s.Get("ci", "build-1")
+	if job.Via != "local" || job.IP != "" || job.Country != "" || job.ReceivedAt != "" {
+		t.Fatalf("local stamp %+v", job)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	reopened, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	job, ok = reopened.Get("ci", "build-1")
+	if !ok || job.Via != "local" || job.IP != "" || job.Country != "" || job.ReceivedAt != "" {
+		t.Fatalf("replay %+v ok=%v", job, ok)
+	}
+	if err := reopened.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	oldDir := t.TempDir()
+	line := "{\"kind\":\"update\",\"n\":1,\"ts\":\"2026-03-01T12:00:00Z\",\"agent\":\"a\",\"job_id\":\"j\",\"state\":\"running\",\"title\":\"Old\"}\n"
+	if err := os.WriteFile(filepath.Join(oldDir, logName), []byte(line), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	old, err := Open(oldDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer old.Close()
+	job, ok = old.Get("a", "j")
+	if !ok || job.Title != "Old" || job.State != "running" || job.Via != "" || job.IP != "" || job.Country != "" || job.ReceivedAt != "" {
+		t.Fatalf("old log %+v ok=%v", job, ok)
+	}
+	raw, err := json.Marshal(job)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), `"via"`) || strings.Contains(string(raw), `"ip"`) || strings.Contains(string(raw), `"country"`) || strings.Contains(string(raw), `"received_at"`) {
+		t.Fatalf("old job leaked provenance: %s", raw)
+	}
+}
+
 func itoa(n int) string {
 	if n == 0 {
 		return "0"

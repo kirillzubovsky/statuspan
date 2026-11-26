@@ -99,6 +99,7 @@ func (s *Server) handlePost(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "invalid json")
 		return
 	}
+	stampLocal(updates)
 	if err := s.store.ValidateBatch(updates); err != nil {
 		writeStoreErr(w, err)
 		return
@@ -115,6 +116,17 @@ func (s *Server) handlePost(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "applied": applied})
+}
+
+// stampLocal overwrites client provenance. Loopback HTTP and the unix socket
+// both land here, and neither has a request IP worth recording.
+func stampLocal(updates []store.Update) {
+	for i := range updates {
+		updates[i].Via = "local"
+		updates[i].IP = ""
+		updates[i].Country = ""
+		updates[i].ReceivedAt = ""
+	}
 }
 
 func decodeUpdates(body []byte) ([]store.Update, error) {

@@ -465,18 +465,22 @@ func saveCursor(dir string, n int64) error {
 }
 
 type relayEvent struct {
-	Cursor   int64     `json:"cursor"`
-	N        int64     `json:"n"`
-	Agent    string    `json:"agent"`
-	JobID    string    `json:"job_id"`
-	State    string    `json:"state"`
-	Progress *int      `json:"progress"`
-	Note     *string   `json:"note"`
-	Title    *string   `json:"title"`
-	Link     *string   `json:"link"`
-	TS       time.Time `json:"ts"`
-	Seq      *int64    `json:"seq"`
-	Kind     string    `json:"kind"`
+	Cursor     int64     `json:"cursor"`
+	N          int64     `json:"n"`
+	Agent      string    `json:"agent"`
+	JobID      string    `json:"job_id"`
+	State      string    `json:"state"`
+	Progress   *int      `json:"progress"`
+	Note       *string   `json:"note"`
+	Title      *string   `json:"title"`
+	Link       *string   `json:"link"`
+	TS         time.Time `json:"ts"`
+	Seq        *int64    `json:"seq"`
+	Kind       string    `json:"kind"`
+	Via        string    `json:"via,omitempty"`
+	IP         string    `json:"ip,omitempty"`
+	Country    string    `json:"country,omitempty"`
+	ReceivedAt string    `json:"received_at,omitempty"`
 }
 
 func (ev relayEvent) id() int64 {
@@ -488,11 +492,15 @@ func (ev relayEvent) id() int64 {
 
 func (ev relayEvent) toUpdate() store.Update {
 	u := store.Update{
-		Agent:    ev.Agent,
-		JobID:    ev.JobID,
-		State:    ev.State,
-		Progress: ev.Progress,
-		Seq:      ev.Seq,
+		Agent:      ev.Agent,
+		JobID:      ev.JobID,
+		State:      ev.State,
+		Progress:   ev.Progress,
+		Seq:        ev.Seq,
+		Via:        ev.Via,
+		IP:         ev.IP,
+		Country:    ev.Country,
+		ReceivedAt: ev.ReceivedAt,
 	}
 	if ev.Title != nil {
 		title := *ev.Title

@@ -153,6 +153,14 @@ statuspan post --agent "<agent-name>" --job connect-test --state running --note 
 
 Then look for that job on the board, or `curl -s "http://${STATUSPAN_ADDR:-127.0.0.1:4477}/api/jobs"`.
 
+## Where did this update come from?
+
+A hostname in a note is self-reported. The agent typed it, and a client can fake it.
+
+The relay stamps each accepted write with the write token's label (or the token id when the label is empty), the request IP, the country, and the time it received the update. Clients cannot set or overwrite `via`, `ip`, `country`, or `received_at`. The board shows a muted line such as `via ci-builder · 203.0.113.10 · US`. A post that never went through the relay shows `via local`.
+
+The local board only shows this after it is running a daemon build that understands the new fields. An older daemon still syncs jobs; it just will not display the stamp.
+
 ## Self-host the relay
 
 Cloud and remote agents (Cursor cloud agents, CI, other servers) cannot reach `127.0.0.1` on your machine. They post to a relay with a write token stored as a secret. The local daemon pulls those jobs in. If you do not want to run Cloudflare yourself, use Hosted Relay: https://statuspan.com/cloud.

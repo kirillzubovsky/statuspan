@@ -18,7 +18,16 @@ import {
   type ParsedUpdate,
 } from "./protocol";
 
-const EVENT_COLUMNS = `cursor, agent, job_id, state, has_progress, progress, note, title, link, ts, applied, has_seq, seq, kind`;
+const EVENT_COLUMNS = `cursor, agent, job_id, state, has_progress, progress, note, title, link, ts, applied, has_seq, seq, kind, via, ip, country, received_at`;
+
+const JOB_COLUMNS = `agent, job_id, title, state, progress, link, note, ttl, seq, has_seq, started_at, updated_at, finished_at, via, ip, country, received_at`;
+
+type Provenance = {
+  via: string;
+  ip: string;
+  country: string;
+  received_at: string;
+};
 
 type TokenRow = {
   id: string;
@@ -100,7 +109,11 @@ export class Workspace extends DurableObject<Env> {
     return json(200, { ok: true, revoked: true });
   }
 
-  async postJobs(tokenHash: string | null, body: string): Promise<Response> {
+  async postJobs(
+    tokenHash: string | null,
+    body: string,
+    net: { ip: string; country: string },
+  ): Promise<Response> {
     const auth = this.gate(tokenHash, "write");
     if (auth instanceof Response) return auth;
     const parsed = parseUpdates(body);
@@ -113,9 +126,15 @@ export class Workspace extends DurableObject<Env> {
     const invalid = this.validateBatch(parsed.updates);
     if (invalid) return json(400, { ok: false, error: invalid });
     const ts = new Date().toISOString();
+    const stamp: Provenance = {
+      via: tokenVia(auth),
+      ip: (net?.ip ?? "").trim(),
+      country: (net?.country ?? "").trim(),
+      received_at: ts,
+    };
     let applied = false;
     for (const update of parsed.updates) {
-      if (this.applyUpdate(update, ts)) applied = true;
+      if (this.applyUpdate(update, ts, stamp)) applied = true;
     }
     this.pruneEvents();
     return json(200, { ok: true, applied });
@@ -242,6 +261,10 @@ export class Workspace extends DurableObject<Env> {
       started_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       finished_at TEXT,
+      via TEXT NOT NULL DEFAULT '',
+      ip TEXT NOT NULL DEFAULT '',
+      country TEXT NOT NULL DEFAULT '',
+      received_at TEXT NOT NULL DEFAULT '',
       PRIMARY KEY (agent, job_id)
     )`);
     this.sql.exec(`CREATE TABLE IF NOT EXISTS events (
@@ -258,11 +281,31 @@ export class Workspace extends DurableObject<Env> {
       applied INTEGER NOT NULL,
       has_seq INTEGER NOT NULL,
       seq INTEGER,
-      kind TEXT NOT NULL
+      kind TEXT NOT NULL,
+      via TEXT NOT NULL DEFAULT '',
+      ip TEXT NOT NULL DEFAULT '',
+      country TEXT NOT NULL DEFAULT '',
+      received_at TEXT NOT NULL DEFAULT ''
     )`);
     this.sql.exec(
       "CREATE INDEX IF NOT EXISTS events_job ON events (agent, job_id, cursor)",
     );
+    // CREATE TABLE IF NOT EXISTS does not add columns to a Durable Object
+    // that already has the table. Adding them again is a duplicate-column error.
+    for (const column of ["via", "ip", "country", "received_at"] as const) {
+      this.addTextColumn("jobs", column);
+      this.addTextColumn("events", column);
+    }
+  }
+
+  private addTextColumn(table: "jobs" | "events", column: "via" | "ip" | "country" | "received_at"): void {
+    try {
+      this.sql.exec(`ALTER TABLE ${table} ADD COLUMN ${column} TEXT NOT NULL DEFAULT ''`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.toLowerCase().includes("duplicate column")) return;
+      throw err;
+    }
   }
 
   private isCreated(): boolean {
@@ -306,7 +349,7 @@ export class Workspace extends DurableObject<Env> {
     return null;
   }
 
-  private applyUpdate(update: ParsedUpdate, ts: string): boolean {
+  private applyUpdate(update: ParsedUpdate, ts: string, stamp: Provenance): boolean {
     const existing = this.loadJob(update.agent, update.jobId);
     const applied = seqApplies(existing, update.seq);
     const job = existing ?? freshJob(update, ts);
@@ -314,8 +357,8 @@ export class Workspace extends DurableObject<Env> {
     this.sql.exec(
       `INSERT INTO events (
         cursor, agent, job_id, state, has_progress, progress, note, title, link,
-        ts, applied, has_seq, seq, kind
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'update')`,
+        ts, applied, has_seq, seq, kind, via, ip, country, received_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'update', ?, ?, ?, ?)`,
       cursor,
       update.agent,
       update.jobId,
@@ -329,9 +372,17 @@ export class Workspace extends DurableObject<Env> {
       applied ? 1 : 0,
       update.seq === undefined ? 0 : 1,
       update.seq ?? null,
+      stamp.via,
+      stamp.ip,
+      stamp.country,
+      stamp.received_at,
     );
     if (!applied) return false;
     mergeJob(job, update, ts);
+    job.via = stamp.via;
+    job.ip = stamp.ip;
+    job.country = stamp.country;
+    job.received_at = stamp.received_at;
     this.saveJob(job);
     this.publishJob(job);
     return true;
@@ -339,9 +390,7 @@ export class Workspace extends DurableObject<Env> {
 
   private loadJob(agent: string, jobId: string): JobRow | null {
     const rows = this.sql.exec<JobRow>(
-      `SELECT agent, job_id, title, state, progress, link, note, ttl, seq, has_seq,
-              started_at, updated_at, finished_at
-       FROM jobs WHERE agent = ? AND job_id = ?`,
+      `SELECT ${JOB_COLUMNS} FROM jobs WHERE agent = ? AND job_id = ?`,
       agent,
       jobId,
     ).toArray();
@@ -360,8 +409,8 @@ export class Workspace extends DurableObject<Env> {
     this.sql.exec(
       `INSERT INTO jobs (
         agent, job_id, title, state, progress, link, note, ttl, seq, has_seq,
-        started_at, updated_at, finished_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        started_at, updated_at, finished_at, via, ip, country, received_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(agent, job_id) DO UPDATE SET
         title = excluded.title,
         state = excluded.state,
@@ -373,7 +422,11 @@ export class Workspace extends DurableObject<Env> {
         has_seq = excluded.has_seq,
         started_at = excluded.started_at,
         updated_at = excluded.updated_at,
-        finished_at = excluded.finished_at`,
+        finished_at = excluded.finished_at,
+        via = excluded.via,
+        ip = excluded.ip,
+        country = excluded.country,
+        received_at = excluded.received_at`,
       job.agent,
       job.job_id,
       job.title,
@@ -387,6 +440,10 @@ export class Workspace extends DurableObject<Env> {
       job.started_at,
       job.updated_at,
       job.finished_at,
+      job.via,
+      job.ip,
+      job.country,
+      job.received_at,
     );
   }
 
@@ -416,9 +473,7 @@ export class Workspace extends DurableObject<Env> {
 
   private jobViews(nowMs: number): Record<string, unknown>[] {
     const jobs = this.sql.exec<JobRow>(
-      `SELECT agent, job_id, title, state, progress, link, note, ttl, seq, has_seq,
-              started_at, updated_at, finished_at
-       FROM jobs`,
+      `SELECT ${JOB_COLUMNS} FROM jobs`,
     ).toArray();
     const views = jobs.map((job) => toJobJson(job, this.jobHistory(job.agent, job.job_id), nowMs));
     views.sort((a, b) => {
@@ -480,6 +535,11 @@ function notCreated(): Response {
 
 function jobKey(agent: string, jobId: string): string {
   return `${agent}\0${jobId}`;
+}
+
+function tokenVia(token: TokenRow): string {
+  if (token.label) return token.label;
+  return token.id;
 }
 
 type MintInput = {

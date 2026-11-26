@@ -73,7 +73,7 @@ async function route(request: Request, env: Env, url: URL): Promise<Response> {
     if (request.method === "POST") {
       const body = await readLimitedText(request);
       if (!body.ok) return body.response;
-      return stub(env, workspace).postJobs(tokenHash, body.text);
+      return stub(env, workspace).postJobs(tokenHash, body.text, requestProvenance(request));
     }
     return methodNotAllowed("GET, POST");
   }
@@ -104,6 +104,32 @@ async function route(request: Request, env: Env, url: URL): Promise<Response> {
 function stub(env: Env, workspace: string): DurableObjectStub<Workspace> {
   const id = env.WORKSPACE.idFromName(workspace);
   return env.WORKSPACE.get(id);
+}
+
+export type RequestNet = {
+  ip: string;
+  country: string;
+};
+
+// Server-side source of a write. The client cannot set these. cf.country wins
+// when the edge populated it; otherwise the country header is the fallback.
+export function requestProvenance(request: Request): RequestNet {
+  const ip = headerTrim(request, "CF-Connecting-IP");
+  const fromCf = cfCountry(request);
+  const country = fromCf !== "" ? fromCf : headerTrim(request, "CF-IPCountry");
+  return { ip, country };
+}
+
+function headerTrim(request: Request, name: string): string {
+  return (request.headers.get(name) ?? "").trim();
+}
+
+function cfCountry(request: Request): string {
+  const cf = request.cf;
+  if (!cf || typeof cf !== "object") return "";
+  const country = (cf as { country?: unknown }).country;
+  if (typeof country !== "string") return "";
+  return country.trim();
 }
 
 async function hashBearer(request: Request): Promise<string | null> {

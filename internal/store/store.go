@@ -42,32 +42,40 @@ func invalid(msg string) error { return &ValidationError{Msg: msg} }
 // Update is one ingested job report. Nil pointers mean the field was omitted
 // and must not overwrite the stored value.
 type Update struct {
-	Agent    string  `json:"agent"`
-	JobID    string  `json:"job_id"`
-	Title    *string `json:"title,omitempty"`
-	State    string  `json:"state"`
-	Progress *int    `json:"progress,omitempty"`
-	Link     *string `json:"link,omitempty"`
-	Seq      *int64  `json:"seq,omitempty"`
-	TTL      *int    `json:"ttl,omitempty"`
-	Note     *string `json:"note,omitempty"`
+	Agent      string  `json:"agent"`
+	JobID      string  `json:"job_id"`
+	Title      *string `json:"title,omitempty"`
+	State      string  `json:"state"`
+	Progress   *int    `json:"progress,omitempty"`
+	Link       *string `json:"link,omitempty"`
+	Seq        *int64  `json:"seq,omitempty"`
+	TTL        *int    `json:"ttl,omitempty"`
+	Note       *string `json:"note,omitempty"`
+	Via        string  `json:"via,omitempty"`
+	IP         string  `json:"ip,omitempty"`
+	Country    string  `json:"country,omitempty"`
+	ReceivedAt string  `json:"received_at,omitempty"`
 }
 
 // Event is one history row. Applied is false when a seq was older than the
 // stored seq and the current job fields were left unchanged.
 type Event struct {
-	N        int64     `json:"n,omitempty"`
-	Agent    string    `json:"agent"`
-	JobID    string    `json:"job_id"`
-	State    string    `json:"state,omitempty"`
-	Progress *int      `json:"progress,omitempty"`
-	Note     string    `json:"note,omitempty"`
-	Title    string    `json:"title,omitempty"`
-	Link     string    `json:"link,omitempty"`
-	TS       time.Time `json:"ts"`
-	Applied  bool      `json:"applied"`
-	Seq      *int64    `json:"seq,omitempty"`
-	Kind     string    `json:"kind,omitempty"`
+	N          int64     `json:"n,omitempty"`
+	Agent      string    `json:"agent"`
+	JobID      string    `json:"job_id"`
+	State      string    `json:"state,omitempty"`
+	Progress   *int      `json:"progress,omitempty"`
+	Note       string    `json:"note,omitempty"`
+	Title      string    `json:"title,omitempty"`
+	Link       string    `json:"link,omitempty"`
+	TS         time.Time `json:"ts"`
+	Applied    bool      `json:"applied"`
+	Seq        *int64    `json:"seq,omitempty"`
+	Kind       string    `json:"kind,omitempty"`
+	Via        string    `json:"via,omitempty"`
+	IP         string    `json:"ip,omitempty"`
+	Country    string    `json:"country,omitempty"`
+	ReceivedAt string    `json:"received_at,omitempty"`
 }
 
 // JobView is the current job plus computed fields for the board and API.
@@ -81,6 +89,10 @@ type JobView struct {
 	Seq            *int64     `json:"seq,omitempty"`
 	TTL            int        `json:"ttl"`
 	Note           string     `json:"note,omitempty"`
+	Via            string     `json:"via,omitempty"`
+	IP             string     `json:"ip,omitempty"`
+	Country        string     `json:"country,omitempty"`
+	ReceivedAt     string     `json:"received_at,omitempty"`
 	StartedAt      time.Time  `json:"started_at"`
 	UpdatedAt      time.Time  `json:"updated_at"`
 	FinishedAt     *time.Time `json:"finished_at,omitempty"`
@@ -140,6 +152,10 @@ type jobState struct {
 	startedAt  time.Time
 	updatedAt  time.Time
 	finishedAt *time.Time
+	via        string
+	ip         string
+	country    string
+	receivedAt string
 	history    []Event
 }
 
@@ -454,6 +470,11 @@ func (j *jobState) merge(u Update, ts time.Time) {
 		j.hasSeq = true
 	}
 	j.updatedAt = ts
+	// Latest applied update wins, including a local post that clears a relay stamp.
+	j.via = u.Via
+	j.ip = u.IP
+	j.country = u.Country
+	j.receivedAt = u.ReceivedAt
 }
 
 func (s *Store) removeJob(agent, jobID string, ts time.Time, n int64, notify bool) {
@@ -569,6 +590,10 @@ func eventFromUpdate(u Update, ts time.Time, n int64, applied bool) Event {
 		seq := *u.Seq
 		ev.Seq = &seq
 	}
+	ev.Via = u.Via
+	ev.IP = u.IP
+	ev.Country = u.Country
+	ev.ReceivedAt = u.ReceivedAt
 	return ev
 }
 
@@ -736,6 +761,10 @@ func (j *jobState) view(now time.Time, pol abandonPolicy) JobView {
 		Link:           j.link,
 		TTL:            j.ttl,
 		Note:           j.note,
+		Via:            j.via,
+		IP:             j.ip,
+		Country:        j.country,
+		ReceivedAt:     j.receivedAt,
 		StartedAt:      j.startedAt,
 		UpdatedAt:      j.updatedAt,
 		ElapsedSeconds: j.elapsed(now),
@@ -877,17 +906,21 @@ func (j *jobState) snap() *snapJob {
 	hist := make([]Event, len(j.history))
 	copy(hist, j.history)
 	out := &snapJob{
-		Agent:     j.agent,
-		JobID:     j.jobID,
-		Title:     j.title,
-		State:     j.state,
-		Progress:  j.progress,
-		Link:      j.link,
-		TTL:       j.ttl,
-		Note:      j.note,
-		StartedAt: j.startedAt,
-		UpdatedAt: j.updatedAt,
-		History:   hist,
+		Agent:      j.agent,
+		JobID:      j.jobID,
+		Title:      j.title,
+		State:      j.state,
+		Progress:   j.progress,
+		Link:       j.link,
+		TTL:        j.ttl,
+		Note:       j.note,
+		Via:        j.via,
+		IP:         j.ip,
+		Country:    j.country,
+		ReceivedAt: j.receivedAt,
+		StartedAt:  j.startedAt,
+		UpdatedAt:  j.updatedAt,
+		History:    hist,
 	}
 	if j.hasSeq {
 		seq := j.seq

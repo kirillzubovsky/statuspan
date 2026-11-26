@@ -1,7 +1,7 @@
 import { env, runInDurableObject, SELF } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import { sha256Hex } from "../src/auth";
-import { Workspace } from "../src/index";
+import { Workspace, requestProvenance } from "../src/index";
 
 const ADMIN = "test-admin-secret";
 const BASE = "http://relay.test";
@@ -16,7 +16,21 @@ type Job = {
   note?: string;
   seq?: number;
   ttl: number;
-  history: Array<{ cursor: number; applied: boolean; seq?: number; state?: string; note?: string }>;
+  history: Array<{
+    cursor: number;
+    applied: boolean;
+    seq?: number;
+    state?: string;
+    note?: string;
+    via?: string;
+    ip?: string;
+    country?: string;
+    received_at?: string;
+  }>;
+  via?: string;
+  ip?: string;
+  country?: string;
+  received_at?: string;
 };
 
 type ListedEvent = {
@@ -30,6 +44,10 @@ type ListedEvent = {
   progress?: number;
   note?: string;
   title?: string;
+  via?: string;
+  ip?: string;
+  country?: string;
+  received_at?: string;
 };
 
 function workspaceName(): string {
@@ -74,9 +92,15 @@ function auth(token: string, init: RequestInit = {}): RequestInit {
   return { ...init, headers };
 }
 
-async function postJobs(name: string, token: string, payload: unknown): Promise<Response> {
+async function postJobs(
+  name: string,
+  token: string,
+  payload: unknown,
+  headers?: HeadersInit,
+): Promise<Response> {
   return SELF.fetch(`${BASE}/v1/w/${name}/jobs`, auth(token, {
     method: "POST",
+    headers,
     body: JSON.stringify(payload),
   }));
 }
@@ -465,5 +489,158 @@ describe("relay", () => {
     expect(text).toContain("event: snapshot");
     expect(text).toContain("\"jobs\"");
     await readerBody!.cancel();
+  });
+
+  it("reads ip and country from the request, with cf.country ahead of the header", () => {
+    const headersOnly = new Request("https://relay.test/v1/w/home/jobs", {
+      headers: {
+        "CF-Connecting-IP": " 203.0.113.10 ",
+        "CF-IPCountry": "US",
+      },
+    });
+    expect(requestProvenance(headersOnly)).toEqual({ ip: "203.0.113.10", country: "US" });
+
+    const fromCf = new Request("https://relay.test/v1/w/home/jobs", {
+      headers: {
+        "CF-Connecting-IP": "203.0.113.10",
+        "CF-IPCountry": "DE",
+      },
+      cf: { country: "US" },
+    } as RequestInit);
+    expect(requestProvenance(fromCf).country).toBe("US");
+    expect(requestProvenance(new Request("https://relay.test/")).ip).toBe("");
+    expect(requestProvenance(new Request("https://relay.test/")).country).toBe("");
+  });
+
+  it("stamps writes from the token and the request, not the body", async () => {
+    const name = workspaceName();
+    await createWorkspace(name);
+    const writer = await mint(name, { kind: "write", agent: "ci", label: "ci-builder" });
+    const reader = await mint(name, { kind: "read" });
+    const spoofed = {
+      agent: "ci",
+      job_id: "build-1",
+      state: "running",
+      note: "on host.example",
+      via: "evil-host",
+      ip: "198.51.100.1",
+      country: "ZZ",
+      received_at: "2000-01-01T00:00:00.000Z",
+    };
+    const created = await postJobs(name, writer.token, spoofed, {
+      "CF-Connecting-IP": "203.0.113.10",
+      "CF-IPCountry": "US",
+    });
+    expect(created.status).toBe(200);
+    expect((await bodyOf(created)).applied).toBe(true);
+
+    const events = await getEvents(name, reader.token);
+    expect(events.events).toHaveLength(1);
+    const event = events.events[0];
+    expect(event.via).toBe("ci-builder");
+    expect(event.ip).toBe("203.0.113.10");
+    expect(event.country).toBe("US");
+    expect(event.received_at).not.toBe("2000-01-01T00:00:00.000Z");
+    expect(Date.parse(event.received_at ?? "")).toBeGreaterThan(Date.now() - 60_000);
+    expect(JSON.stringify(event)).not.toContain("evil-host");
+    expect(JSON.stringify(event)).not.toContain("198.51.100.1");
+
+    const jobs = await getJobs(name, reader.token);
+    const job = jobs.jobs[0];
+    expect(job.via).toBe("ci-builder");
+    expect(job.ip).toBe("203.0.113.10");
+    expect(job.country).toBe("US");
+    expect(job.received_at).toBe(event.received_at);
+    expect(job.history).toHaveLength(1);
+    expect(job.history[0].via).toBe("ci-builder");
+    expect(job.history[0].ip).toBe("203.0.113.10");
+    expect(job.history[0].country).toBe("US");
+    expect(job.history[0].received_at).toBe(event.received_at);
+
+    const older = await postJobs(name, writer.token, {
+      ...spoofed,
+      seq: 1,
+      state: "failed",
+      via: "still-spoofed",
+    }, {
+      "CF-Connecting-IP": "203.0.113.10",
+      "CF-IPCountry": "US",
+    });
+    expect(older.status).toBe(200);
+    expect((await bodyOf(older)).applied).toBe(true);
+    const again = await postJobs(name, writer.token, {
+      agent: "ci",
+      job_id: "build-1",
+      seq: 1,
+      state: "done",
+      via: "still-spoofed",
+      ip: "198.51.100.9",
+      country: "ZZ",
+      received_at: "1999-01-01T00:00:00.000Z",
+    }, {
+      "CF-Connecting-IP": "203.0.113.23",
+      "CF-IPCountry": "CA",
+    });
+    expect(again.status).toBe(200);
+    expect((await bodyOf(again)).applied).toBe(false);
+    const after = await getJobs(name, reader.token);
+    expect(after.jobs[0].via).toBe("ci-builder");
+    expect(after.jobs[0].ip).toBe("203.0.113.10");
+    expect(after.jobs[0].country).toBe("US");
+    expect(after.jobs[0].state).toBe("failed");
+    const page = await getEvents(name, reader.token);
+    const rejected = page.events[page.events.length - 1];
+    expect(rejected.applied).toBe(false);
+    expect(rejected.via).toBe("ci-builder");
+    expect(rejected.ip).toBe("203.0.113.23");
+    expect(rejected.country).toBe("CA");
+    expect(rejected.received_at).not.toBe("1999-01-01T00:00:00.000Z");
+    expect(JSON.stringify(page)).not.toContain("still-spoofed");
+  });
+
+  it("keeps the token label when the request has no network headers", async () => {
+    const name = workspaceName();
+    await createWorkspace(name);
+    const writer = await mint(name, { kind: "write", agent: "ci", label: "ci-builder" });
+    const reader = await mint(name, { kind: "read" });
+    const created = await postJobs(name, writer.token, {
+      agent: "ci",
+      job_id: "build-1",
+      state: "queued",
+      via: "evil-host",
+      ip: "198.51.100.1",
+      country: "ZZ",
+      received_at: "2000-01-01T00:00:00.000Z",
+    });
+    expect(created.status).toBe(200);
+    const events = await getEvents(name, reader.token);
+    expect(events.events[0].via).toBe("ci-builder");
+    expect(events.events[0].ip ?? "").toBe("");
+    expect(events.events[0].country ?? "").toBe("");
+    expect(events.events[0].received_at).not.toBe("2000-01-01T00:00:00.000Z");
+    const job = (await getJobs(name, reader.token)).jobs[0];
+    expect(job.via).toBe("ci-builder");
+    expect(job.ip ?? "").toBe("");
+    expect(job.country ?? "").toBe("");
+    expect(JSON.stringify(job)).not.toContain("evil-host");
+    expect(JSON.stringify(job)).not.toContain("198.51.100.1");
+  });
+
+  it("falls back to the token id when the write token has no label", async () => {
+    const name = workspaceName();
+    await createWorkspace(name);
+    const writer = await mint(name, { kind: "write", agent: "ci" });
+    const reader = await mint(name, { kind: "read" });
+    const created = await postJobs(name, writer.token, {
+      agent: "ci",
+      job_id: "build-1",
+      state: "running",
+      via: "evil-host",
+    });
+    expect(created.status).toBe(200);
+    const event = (await getEvents(name, reader.token)).events[0];
+    expect(event.via).toBe(writer.id);
+    expect(event.via).not.toBe("evil-host");
+    expect(event.via).not.toBe("ci");
   });
 });

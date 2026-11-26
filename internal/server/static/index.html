@@ -97,7 +97,9 @@ a.who:hover{color:var(--text);text-decoration:none}
 .brow-h{min-height:32px;cursor:default;font-size:11.5px;font-weight:600;color:var(--text3);position:sticky;top:0;z-index:2;background:var(--surf)}
 .b-bot{min-width:0;display:flex;align-items:center}
 .b-bot .who{max-width:100%;min-width:0}
+.b-title-col{min-width:0;display:flex;flex-direction:column;justify-content:center;gap:1px}
 .b-title{font-weight:600;font-size:15px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.b-via{color:var(--text3);font-size:11px;font-weight:450;line-height:1.3;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .b-status{display:inline-flex;align-items:center;gap:6px;min-width:0;white-space:nowrap}
 .word{font-size:12px;font-weight:700;letter-spacing:.12em;text-transform:uppercase}
 .word.failed{color:var(--failed)}.word.blocked{color:var(--blocked)}.word.stalled{color:var(--stalled)}.word.abandoned{color:var(--abandoned)}.word.running{color:var(--running)}.word.queued{color:var(--queued)}.word.done{color:var(--done)}
@@ -146,7 +148,8 @@ a.back:hover{color:var(--text)}
 .row.sel{background:var(--accent-bg)}
 .row .id{color:var(--text3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .row .t{display:flex;align-items:center;gap:8px;min-width:0}
-.row .t b{font-weight:550;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:46%}
+.row .t-main{display:flex;flex-direction:column;justify-content:center;min-width:0;max-width:46%}
+.row .t-main b{font-weight:550;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .row .t em{font-style:normal;color:var(--text3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:12px;min-width:0}
 .prog{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text2)}
 .prog .bar{flex:1}
@@ -621,6 +624,29 @@ a.ext{color:var(--accent);font-size:14px;text-decoration:none}
     return { agent: route.agent, jobId: route.jobId };
   }
 
+  function provenanceText(job) {
+    var via = String(job && job.via || "").trim();
+    if (!via) return null;
+    if (via === "local") {
+      return { text: "via local", title: "Posted directly to this board, not through the relay." };
+    }
+    var parts = ["via " + via];
+    var ip = String(job.ip || "").trim();
+    var country = String(job.country || "").trim();
+    if (ip) parts.push(ip);
+    if (country) parts.push(country);
+    return {
+      text: parts.join(" · "),
+      title: "The relay stamps this from the write token and the request. Clients cannot fake it."
+    };
+  }
+
+  function provenanceHTML(job) {
+    var stamp = provenanceText(job);
+    if (!stamp) return "";
+    return '<span class="b-via" title="' + esc(stamp.title) + '">' + esc(stamp.text) + "</span>";
+  }
+
   function renderBoardRow(job, sel) {
     var pct = pctOf(job);
     var on = !!(sel && sel.agent === job.agent && sel.jobId === job.job_id);
@@ -628,7 +654,7 @@ a.ext{color:var(--accent);font-size:14px;text-decoration:none}
     var mark = isAbandoned(job) ? " is-abandoned" : (isStalled(job) ? " is-stalled" : "");
     return '<div class="brow' + (on ? " sel" : "") + mark + '" role="button" tabindex="0" data-board-row="1" data-agent="' + esc(job.agent) + '" data-job-id="' + esc(job.job_id) + '" aria-pressed="' + (on ? "true" : "false") + '">' +
       '<span class="b-bot"><span class="who">' + avatar(job.agent, 18) + "<span>" + esc(job.agent) + "</span></span></span>" +
-      '<span class="b-title" title="' + esc(title) + '">' + esc(title) + "</span>" +
+      '<span class="b-title-col"><span class="b-title" title="' + esc(title) + '">' + esc(title) + "</span>" + provenanceHTML(job) + "</span>" +
       '<span class="b-status">' + statusHTML(job) + "</span>" +
       '<span class="b-prog prog"><span class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="' + pct + '" aria-label="Progress"><i style="width:' + pct + "%;background:" + barColor(job) + '"></i></span><span class="pct">' + pct + "%</span></span>" +
       '<span class="b-upd" data-ago="' + esc(job.updated_at || "") + '">' + esc(ago(job.updated_at)) + "</span></div>";
@@ -738,7 +764,7 @@ a.ext{color:var(--accent);font-size:14px;text-decoration:none}
     var seq = job.seq == null ? "—" : esc(String(job.seq));
     var finished = job.finished_at ? esc(fmtAbs(job.finished_at)) : "—";
     return '<div class="detail"><div class="kicker">' + pill(job.state) + stalledTag(job) + abandonedTag(job) + "</div>" +
-      "<h2>" + esc(job.title || job.job_id) + "</h2>" +
+      "<h2>" + esc(job.title || job.job_id) + "</h2>" + provenanceHTML(job) +
       '<div class="kv">' +
       "<span>Bot</span><span><a href=\"" + agentHref(job.agent) + "\">" + esc(job.agent) + "</a></span>" +
       "<span>Job</span><span class=\"mono\">" + esc(job.job_id) + "</span>" +
@@ -766,7 +792,7 @@ a.ext{color:var(--accent);font-size:14px;text-decoration:none}
       icon(knownState(job.state), pct, 14) +
       '<span class="sr">' + esc(LABELS[job.state] || job.state) + "</span>" +
       '<span class="id mono">' + esc(job.job_id) + "</span>" +
-      '<span class="t"><b>' + esc(job.title || job.job_id) + "</b>" + stalledTag(job) + abandonedTag(job) + note + "</span>" +
+      '<span class="t"><span class="t-main"><b>' + esc(job.title || job.job_id) + "</b>" + provenanceHTML(job) + "</span>" + stalledTag(job) + abandonedTag(job) + note + "</span>" +
       '<span class="prog"><span class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="' + pct + '"><i style="width:' + pct + "%;background:" + barColor(job) + '"></i></span>' + pct + "%</span>" +
       '<span class="el">' + elapsedHTML(job) + "</span>" +
       '<span class="up" data-ago="' + esc(job.updated_at || "") + '">' + esc(ago(job.updated_at)) + "</span>" +

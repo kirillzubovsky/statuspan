@@ -254,6 +254,15 @@ export STATUSPAN_TOKEN_FILE="$HOME/.config/statuspan/token"</code></pre>
    </div>
   </section>
 
+  <section class="panel" aria-labelledby="provenance">
+   <h2 class="sh" id="provenance">Where did this update come from?</h2>
+   <div class="note">
+    <p>A hostname in a note is self-reported. The agent typed it, and a client can fake it.</p>
+    <p>The relay stamps each accepted write with the write token's label (or the token id when the label is empty), the request IP, the country, and the time it received the update. Clients cannot set or overwrite <span class="mono">via</span>, <span class="mono">ip</span>, <span class="mono">country</span>, or <span class="mono">received_at</span>. The board shows a muted line such as <span class="mono">via ci-builder · 203.0.113.10 · US</span>. A post that never went through the relay shows <span class="mono">via local</span>.</p>
+    <p>The local board only shows this after it is running a daemon build that understands the new fields. An older daemon still syncs jobs; it just will not display the stamp.</p>
+   </div>
+  </section>
+
   <section class="panel" aria-labelledby="hosted">
    <h2 class="sh" id="hosted">No Cloudflare setup</h2>
    <div class="note">

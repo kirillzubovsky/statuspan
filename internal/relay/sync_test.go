@@ -512,6 +512,41 @@ func TestClearSectionStaysClearedAcrossSync(t *testing.T) {
 	}
 }
 
+func TestSyncKeepsProvenance(t *testing.T) {
+	token := "read-token-do-not-leak"
+	when := time.Date(2026, 11, 26, 12, 0, 0, 0, time.UTC)
+	fake := &fakeRelay{token: token}
+	fake.add(relayEvent{
+		Cursor: 1, N: 1, Agent: "ci", JobID: "build-1", State: "running",
+		TS: when, Kind: "update",
+		Via: "ci-builder", IP: "203.0.113.10", Country: "US",
+		ReceivedAt: "2026-11-26T12:00:00.000Z",
+	})
+	ts := httptest.NewServer(fake)
+	defer ts.Close()
+	dir := t.TempDir()
+	writeRelayJSON(t, dir, ts.URL, "home", token)
+	st, err := store.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	syncer, err := New(Options{Store: st, DataDir: dir, Client: ts.Client()})
+	if err != nil || syncer == nil {
+		t.Fatalf("syncer=%v err=%v", syncer, err)
+	}
+	if err := syncer.SyncOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	job, ok := st.Get("ci", "build-1")
+	if !ok || job.Via != "ci-builder" || job.IP != "203.0.113.10" || job.Country != "US" || job.ReceivedAt != "2026-11-26T12:00:00.000Z" {
+		t.Fatalf("%+v ok=%v", job, ok)
+	}
+	if len(job.History) != 1 || job.History[0].Via != "ci-builder" || job.History[0].IP != "203.0.113.10" || job.History[0].Country != "US" {
+		t.Fatalf("history %+v", job.History)
+	}
+}
+
 func TestPartialRelayJSON(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, configFile), []byte(`{"url":"http://127.0.0.1:9"}`), 0o600); err != nil {

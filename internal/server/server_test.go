@@ -1002,3 +1002,26 @@ func TestHealthIncludesRelayStatusWithoutToken(t *testing.T) {
 		t.Fatalf("last_ok %s", health.Relay.LastOK)
 	}
 }
+
+func TestLocalPostDropsSpoofedProvenance(t *testing.T) {
+	st, ts := newTestServer(t)
+	body := `{"agent":"a","job_id":"j","state":"running","note":"on host.example","via":"evil-host","ip":"203.0.113.10","country":"US","received_at":"2000-01-01T00:00:00Z"}`
+	resp := postRaw(t, ts.URL, body)
+	if resp.StatusCode != 200 {
+		t.Fatalf("%d %s", resp.StatusCode, readBody(t, resp))
+	}
+	job, ok := st.Get("a", "j")
+	if !ok || job.Via != "local" || job.IP != "" || job.Country != "" || job.ReceivedAt != "" {
+		t.Fatalf("%+v ok=%v", job, ok)
+	}
+	if len(job.History) != 1 || job.History[0].Via != "local" || job.History[0].IP != "" || job.History[0].Country != "" {
+		t.Fatalf("history %+v", job.History)
+	}
+	raw := getJSON(t, ts.URL+"/api/jobs")
+	if strings.Contains(raw, "evil-host") || strings.Contains(raw, "203.0.113.10") || strings.Contains(raw, "2000-01-01") {
+		t.Fatalf("spoofed provenance stored: %s", raw)
+	}
+	if !strings.Contains(raw, `"via":"local"`) {
+		t.Fatalf("missing local stamp: %s", raw)
+	}
+}

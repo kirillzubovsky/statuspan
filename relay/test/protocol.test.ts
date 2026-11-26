@@ -2,9 +2,12 @@ import { describe, expect, it } from "vitest";
 import {
   abandoned,
   abandonedAt,
+  parseUpdates,
   stalled,
+  toEventJson,
   toJobJson,
   validateUpdate,
+  type EventRow,
   type JobRow,
 } from "../src/protocol";
 
@@ -27,6 +30,34 @@ function row(partial: Partial<JobRow> = {}): JobRow {
     started_at: UPDATED,
     updated_at: UPDATED,
     finished_at: null,
+    via: "",
+    ip: "",
+    country: "",
+    received_at: "",
+    ...partial,
+  };
+}
+
+function eventRow(partial: Partial<EventRow> = {}): EventRow {
+  return {
+    cursor: 1,
+    agent: "a",
+    job_id: "j",
+    state: "running",
+    has_progress: 0,
+    progress: null,
+    note: "",
+    title: "",
+    link: "",
+    ts: UPDATED,
+    applied: 1,
+    has_seq: 0,
+    seq: null,
+    kind: "update",
+    via: "",
+    ip: "",
+    country: "",
+    received_at: "",
     ...partial,
   };
 }
@@ -91,5 +122,47 @@ describe("abandoned", () => {
 
   it("rejects state abandoned", () => {
     expect(validateUpdate({ agent: "a", jobId: "j", state: "abandoned" })).toMatch(/queued, running, blocked, done, or failed/);
+  });
+});
+
+describe("provenance", () => {
+  it("ignores client via, ip, country, and received_at", () => {
+    const parsed = parseUpdates(JSON.stringify({
+      agent: "a",
+      job_id: "j",
+      state: "running",
+      via: "evil-host",
+      ip: "198.51.100.1",
+      country: "ZZ",
+      received_at: "2000-01-01T00:00:00.000Z",
+    }));
+    expect(parsed).toEqual({ updates: [{ agent: "a", jobId: "j", state: "running" }] });
+  });
+
+  it("omits empty provenance and includes a stamp when set", () => {
+    expect(toEventJson(eventRow())).not.toHaveProperty("via");
+    expect(toEventJson(eventRow())).not.toHaveProperty("ip");
+    const stamped = toEventJson(eventRow({
+      via: "ci-builder",
+      ip: "203.0.113.10",
+      country: "US",
+      received_at: "2026-11-26T12:00:00.000Z",
+    }));
+    expect(stamped.via).toBe("ci-builder");
+    expect(stamped.ip).toBe("203.0.113.10");
+    expect(stamped.country).toBe("US");
+    expect(stamped.received_at).toBe("2026-11-26T12:00:00.000Z");
+
+    const job = toJobJson(row({
+      via: "ci-builder",
+      ip: "203.0.113.10",
+      country: "US",
+      received_at: "2026-11-26T12:00:00.000Z",
+    }), [], UPDATED_MS);
+    expect(job.via).toBe("ci-builder");
+    expect(job.ip).toBe("203.0.113.10");
+    expect(job.country).toBe("US");
+    expect(job.received_at).toBe("2026-11-26T12:00:00.000Z");
+    expect(toJobJson(row(), [], UPDATED_MS).via).toBeUndefined();
   });
 });
