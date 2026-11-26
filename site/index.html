@@ -197,19 +197,32 @@ code{font:inherit}
  .top nav{gap:10px}
  .dl a{grid-template-columns:1fr}
 }
-/* QED's injected sheet caps .qed-card at 300px and the image at 140px. This slot is a compact thumbnail-plus-text row. */
+/* QED appends #qed-style later: .qed-card { flex-direction: column } and
+   .qed-card .qed-media { display: block; width: 100%; aspect-ratio: 1200/628; max-height: 108px }.
+   a.qed-card is more specific than those class selectors, so this compact row wins at any order. */
 .sponsored-slot{margin:0;padding:12px 20px 16px}
-.sponsored-slot .qed-unit,.sponsored-slot .qed-unit.qed-card-unit,.sponsored-slot .qed-card{max-width:none;width:100%;max-height:none}
-.sponsored-slot .qed-card{display:flex;align-items:center;gap:12px;padding:10px;border:1px solid var(--border);border-radius:10px;background:var(--bg);color:var(--text);text-decoration:none;overflow:hidden;font:13px/1.45 Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif}
-.sponsored-slot .qed-card:hover{color:var(--text);text-decoration:none}
-.sponsored-slot .qed-card .qed-media{flex:0 0 120px;width:120px;height:63px;max-height:none;aspect-ratio:auto;margin:0;border-radius:6px;overflow:hidden;background:var(--surf2)}
-.sponsored-slot .qed-card .qed-media img{width:100%;height:100%;max-height:none;aspect-ratio:auto;object-fit:cover}
-.sponsored-slot .qed-card .qed-body{flex:1 1 auto;min-width:0;padding:0}
+.sponsored-slot .qed-unit,.sponsored-slot .qed-unit.qed-card-unit,.sponsored-slot .qed-card,.sponsored-slot a.qed-card{max-width:none;width:100%;max-height:none}
+.sponsored-slot .qed-card,.sponsored-slot a.qed-card{display:flex;flex-direction:row;align-items:center;gap:12px;padding:10px;border:1px solid var(--border);border-radius:10px;background:var(--bg);color:var(--text);text-decoration:none;overflow:hidden;font:13px/1.45 Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif}
+.sponsored-slot .qed-card:hover,.sponsored-slot a.qed-card:hover{color:var(--text);text-decoration:none}
+.sponsored-slot .qed-card .qed-media,.sponsored-slot a.qed-card .qed-media{display:block;flex:0 0 120px;width:120px;height:63px;max-height:none;aspect-ratio:auto;margin:0;border-radius:6px;overflow:hidden;background:var(--surf2);object-fit:cover}
+.sponsored-slot .qed-card .qed-media img,.sponsored-slot a.qed-card .qed-media img{width:100%;height:100%;max-height:none;aspect-ratio:auto;object-fit:cover}
+.sponsored-slot .qed-card .qed-body,.sponsored-slot a.qed-card .qed-body{flex:1 1 auto;min-width:0;padding:0;text-align:left}
 .sponsored-slot .qed-by{color:var(--text3);font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif}
 .sponsored-slot .qed-by:hover{color:var(--text2)}
 @media (max-width:420px){
- .sponsored-slot .qed-card .qed-media{flex-basis:96px;width:96px;height:50px}
+ .sponsored-slot .qed-card .qed-media,.sponsored-slot a.qed-card .qed-media{flex-basis:96px;width:96px;height:50px}
 }
+.qs-line{color:var(--text);font-size:15px;line-height:1.5}
+.qs-line p{margin:0}
+.qs-line .btn{margin-left:8px;vertical-align:middle;font:inherit;font-size:12px;line-height:1;cursor:pointer}
+.install-more{border-top:1px solid var(--border)}
+.install-more summary{display:flex;align-items:center;gap:8px;min-height:48px;padding:12px 20px;cursor:pointer;font-size:14px;font-weight:600;color:var(--text);list-style:none}
+.install-more summary::-webkit-details-marker{display:none}
+.install-more summary::marker{content:none}
+.install-more summary::before{content:"";width:0;height:0;border-style:solid;border-width:4px 0 4px 5px;border-color:transparent transparent transparent var(--text3);flex:none}
+.install-more[open] > summary::before{border-width:5px 4px 0 4px;border-color:var(--text3) transparent transparent transparent}
+.install-more summary:hover{background:var(--bg)}
+.install-more .steps{border-top:1px solid var(--border)}
 </style>
 </head>
 <body>
@@ -284,54 +297,60 @@ code{font:inherit}
 
   <section class="panel" aria-labelledby="start">
    <h2 class="sh" id="start">Quick start</h2>
-   <ol class="steps">
-    <li>
-     <span class="n">01</span>
-     <div>
-      <b>Install</b>
-      <pre><code>curl -fsSL https://statuspan.com/install.sh | sh</code></pre>
-      <p>The script detects your OS and architecture and installs the release binary to <span class="mono">/usr/local/bin</span> when you are root or that directory is writable, otherwise to <span class="mono">~/.local/bin</span>. After install, run <span class="mono">command -v statuspan</span>. If nothing is found, add the install directory to PATH or call the binary by its full path.</p>
-      <pre><code>command -v statuspan || export PATH="/usr/local/bin:$HOME/.local/bin:$PATH"</code></pre>
-     </div>
-    </li>
-    <li>
-     <span class="n">02</span>
-     <div>
-      <b>Serve</b>
-      <pre><code>statuspan serve</code></pre>
-      <p>Starts the local daemon. It refuses any address that is not loopback.</p>
-     </div>
-    </li>
-    <li>
-     <span class="n">03</span>
-     <div>
-      <b>Open</b>
-      <p><a href="http://localhost:4477">http://localhost:4477</a></p>
-     </div>
-    </li>
-    <li>
-     <span class="n">04</span>
-     <div>
-      <b>Tell your agent</b>
-      <pre><code>statuspan agent
+   <div class="note qs-line">
+    <p>Point your AI agent to <a href="https://statuspan.com/skill.md">https://statuspan.com/skill.md</a><button type="button" class="btn" id="copy-skill">Copy</button> and it will know what to do.</p>
+   </div>
+   <details class="install-more">
+    <summary>How to install by a human…</summary>
+    <ol class="steps">
+     <li>
+      <span class="n">01</span>
+      <div>
+       <b>Install</b>
+       <pre><code>curl -fsSL https://statuspan.com/install.sh | sh</code></pre>
+       <p>The script detects your OS and architecture and installs the release binary to <span class="mono">/usr/local/bin</span> when you are root or that directory is writable, otherwise to <span class="mono">~/.local/bin</span>. After install, run <span class="mono">command -v statuspan</span>. If nothing is found, add the install directory to PATH or call the binary by its full path.</p>
+       <pre><code>command -v statuspan || export PATH="/usr/local/bin:$HOME/.local/bin:$PATH"</code></pre>
+      </div>
+     </li>
+     <li>
+      <span class="n">02</span>
+      <div>
+       <b>Serve</b>
+       <pre><code>statuspan serve</code></pre>
+       <p>Starts the local daemon. It refuses any address that is not loopback.</p>
+      </div>
+     </li>
+     <li>
+      <span class="n">03</span>
+      <div>
+       <b>Open</b>
+       <p><a href="http://localhost:4477">http://localhost:4477</a></p>
+      </div>
+     </li>
+     <li>
+      <span class="n">04</span>
+      <div>
+       <b>Tell your agent</b>
+       <pre><code>statuspan agent
 statuspan agent install
 # example: wrap any command
 statuspan run --agent "My Agent" --job hello -- sleep 5</code></pre>
-      <p><span class="mono">statuspan agent</span> prints the skill. <span class="mono">statuspan agent install</span> writes it where agents look. <span class="mono">statuspan run</span> wraps a command, posts running then done or failed, and keeps that command's exit code. The last two lines are only an example of wrapping your own command. <span class="mono">sleep 5</span> is a harmless demo.</p>
-     </div>
-    </li>
-   </ol>
-  </section>
-
-  <section class="panel" aria-labelledby="post">
-   <h2 class="sh" id="post">Post your first job</h2>
-   <div class="note">
-    <p>Use <span class="mono">statuspan post</span>. The CLI posts to the relay when <span class="mono">STATUSPAN_RELAY_URL</span>, <span class="mono">STATUSPAN_RELAY_WORKSPACE</span>, and <span class="mono">STATUSPAN_TOKEN_FILE</span> are set, and to the local daemon otherwise.</p>
-    <pre><code>statuspan post --agent "My Agent" --job build-1 --state running --progress 40</code></pre>
-    <p>As a backup, you can always use the URL with plain curl, as long as the URL is the one where StatusPan is actually running.</p>
-    <pre><code>curl -s -X POST "${STATUSPAN_URL:-http://127.0.0.1:4477/api/jobs}" -H 'Content-Type: application/json' -d '{"agent":"My Agent","job_id":"build-1","state":"running","progress":40}'</code></pre>
-    <p>Reload the board. My Agent / build-1 shows as running.</p>
-   </div>
+       <p><span class="mono">statuspan agent</span> prints the skill. <span class="mono">statuspan agent install</span> writes it where agents look. <span class="mono">statuspan run</span> wraps a command, posts running then done or failed, and keeps that command's exit code. The last two lines are only an example of wrapping your own command. <span class="mono">sleep 5</span> is a harmless demo.</p>
+      </div>
+     </li>
+     <li id="post">
+      <span class="n">05</span>
+      <div>
+       <b>Post your first job</b>
+       <p>Use <span class="mono">statuspan post</span>. The CLI posts to the relay when <span class="mono">STATUSPAN_RELAY_URL</span>, <span class="mono">STATUSPAN_RELAY_WORKSPACE</span>, and <span class="mono">STATUSPAN_TOKEN_FILE</span> are set, and to the local daemon otherwise.</p>
+       <pre><code>statuspan post --agent "My Agent" --job build-1 --state running --progress 40</code></pre>
+       <p>As a backup, you can always use the URL with plain curl, as long as the URL is the one where StatusPan is actually running.</p>
+       <pre><code>curl -s -X POST "${STATUSPAN_URL:-http://127.0.0.1:4477/api/jobs}" -H 'Content-Type: application/json' -d '{"agent":"My Agent","job_id":"build-1","state":"running","progress":40}'</code></pre>
+       <p>Reload the board. My Agent / build-1 shows as running.</p>
+      </div>
+     </li>
+    </ol>
+   </details>
   </section>
 
   <section class="panel sponsored" aria-labelledby="sponsored">
@@ -411,5 +430,46 @@ statuspan run --agent "My Agent" --job hello -- sleep 5</code></pre>
   </footer>
  </div>
 </main>
+<script>
+(function () {
+  var btn = document.getElementById("copy-skill");
+  if (btn) {
+    btn.addEventListener("click", function () {
+      var url = "https://statuspan.com/skill.md";
+      var label = btn.textContent;
+      function copied() {
+        btn.textContent = "Copied";
+        window.setTimeout(function () { btn.textContent = label; }, 1500);
+      }
+      function fallback() {
+        var area = document.createElement("textarea");
+        area.value = url;
+        area.setAttribute("readonly", "");
+        area.style.position = "fixed";
+        area.style.left = "-9999px";
+        document.body.appendChild(area);
+        area.select();
+        try { document.execCommand("copy"); copied(); } catch (err) {}
+        document.body.removeChild(area);
+      }
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(url).then(copied).catch(fallback);
+      } else {
+        fallback();
+      }
+    });
+  }
+  function revealPost() {
+    if (location.hash !== "#post") return;
+    var target = document.getElementById("post");
+    if (!target) return;
+    var details = target.closest("details");
+    if (details) details.open = true;
+    target.scrollIntoView();
+  }
+  revealPost();
+  window.addEventListener("hashchange", revealPost);
+})();
+</script>
 </body>
 </html>
