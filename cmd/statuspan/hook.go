@@ -72,8 +72,8 @@ const (
 
 // hookAdapter is one coding tool that can report through `statuspan hook`.
 // Stdout is per tool. Claude and Grok print nothing, because those CLIs feed
-// hook stdout back into the session. Codex prints codexHookStdout. Cursor's
-// reply depends on the event; see hookStdout.
+// hook stdout back into the session. Codex prints codexHookStdout. Gemini
+// prints geminiHookStdout. Cursor's reply depends on the event; see hookStdout.
 type hookAdapter struct {
 	name               string
 	displayAgent       string
@@ -88,6 +88,9 @@ type hookAdapter struct {
 	// hooks are never registered: invalid JSON blocks them, and "allow" can
 	// pre-approve a tool.
 	cursor bool
+	// gemini selects Gemini CLI events. Install still merges into settings.json
+	// the way Claude does. Timeouts in that file are milliseconds.
+	gemini bool
 	specs  []hookEventSpec
 	stdout string
 	locate func(project bool, settings, home, dir string) (string, error)
@@ -113,7 +116,7 @@ type hookOpts struct {
 }
 
 func hookRegistry() []hookAdapter {
-	return []hookAdapter{claudeAdapter(), grokAdapter(), codexAdapter(), cursorAdapter()}
+	return []hookAdapter{claudeAdapter(), grokAdapter(), codexAdapter(), cursorAdapter(), geminiAdapter()}
 }
 
 func claudeAdapter() hookAdapter {
@@ -391,6 +394,7 @@ type claudeHookInput struct {
 	NotificationTypeAlt     flexString      `json:"notificationType"`
 	LastAssistantMessage    flexString      `json:"last_assistant_message"`
 	LastAssistantMessageAlt flexString      `json:"lastAssistantMessage"`
+	PromptResponse          flexString      `json:"prompt_response"`
 	StopHookActive          flexBool        `json:"stop_hook_active"`
 	StopHookActiveAlt       flexBool        `json:"stopHookActive"`
 	BackgroundTasks         json.RawMessage `json:"background_tasks"`
@@ -497,6 +501,9 @@ func (a hookAdapter) update(in claudeHookInput, agent string) (store.Update, boo
 	in = normalizeHookInput(in)
 	if a.cursor {
 		return mapCursorHook(in, agent, a.hookOpts())
+	}
+	if a.gemini {
+		return mapGeminiHook(in, agent, a.hookOpts())
 	}
 	return mapSessionHook(in, agent, a.hookOpts())
 }
@@ -1647,10 +1654,12 @@ func parseSettings(data []byte) (map[string]any, error) {
 }
 
 type hookEventSpec struct {
-	name    string
-	matcher string
-	async   bool
-	timeout int
+	name        string
+	matcher     string
+	async       bool
+	timeout     int
+	hookName    string
+	description string
 }
 
 func claudeHookSpecs() []hookEventSpec {
@@ -1969,6 +1978,12 @@ func appendHookGroup(hooks map[string]any, spec hookEventSpec, command string) e
 	handler := map[string]any{
 		"type":    "command",
 		"command": command,
+	}
+	if spec.hookName != "" {
+		handler["name"] = spec.hookName
+	}
+	if spec.description != "" {
+		handler["description"] = spec.description
 	}
 	if spec.async {
 		handler["async"] = true

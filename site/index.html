@@ -341,9 +341,10 @@ code{font:inherit}
        <b>Tell your agent</b>
        <pre><code>statuspan agent
 statuspan agent install
+statuspan hooks install &lt;claude|grok|codex|cursor|gemini&gt;
 # example: wrap any command
 statuspan run --agent "My Agent" --job hello -- sleep 5</code></pre>
-       <p><span class="mono">statuspan agent</span> prints the skill. <span class="mono">statuspan agent install</span> writes it where agents look. <span class="mono">statuspan run</span> wraps a command, posts running then done or failed, and keeps that command's exit code. The last two lines are only an example of wrapping your own command. <span class="mono">sleep 5</span> is a harmless demo.</p>
+       <p><span class="mono">statuspan agent</span> prints the skill. <span class="mono">statuspan agent install</span> writes it where agents look. <span class="mono">statuspan hooks install &lt;claude|grok|codex|cursor|gemini&gt;</span> reports that session. <span class="mono">statuspan run</span> wraps a command, posts running then done or failed, and keeps that command's exit code. The last two lines are only an example of wrapping your own command. <span class="mono">sleep 5</span> is a harmless demo.</p>
       </div>
      </li>
      <li id="post">
@@ -415,9 +416,10 @@ statuspan run --agent "My Agent" --job hello -- sleep 5</code></pre>
   <section class="panel" aria-labelledby="agents">
    <h2 class="sh" id="agents">For AI agents</h2>
    <div class="note">
-    <p>The binary carries the skill. <span class="mono">statuspan agent</span> prints it. <span class="mono">statuspan agent install</span> writes it into the agent directories. <span class="mono">statuspan run</span> wraps a command and posts the outcome. The last two lines below are only an example of wrapping your own command. <span class="mono">sleep 5</span> is a harmless demo. Healthy recurring jobs stay off the board. If a recurring job becomes blocked or failed, post it so it shows under Needs attention. Once it is fixed or unblocked, post <span class="mono">done</span> so it clears out.</p>
+    <p>The binary carries the skill. <span class="mono">statuspan agent</span> prints it. <span class="mono">statuspan agent install</span> writes it into the agent directories. <span class="mono">statuspan hooks install &lt;claude|grok|codex|cursor|gemini&gt;</span> reports that session. <span class="mono">statuspan run</span> wraps a command and posts the outcome. The last two lines below are only an example of wrapping your own command. <span class="mono">sleep 5</span> is a harmless demo. Healthy recurring jobs stay off the board. If a recurring job becomes blocked or failed, post it so it shows under Needs attention. Once it is fixed or unblocked, post <span class="mono">done</span> so it clears out.</p>
     <pre><code>statuspan agent
 statuspan agent install
+statuspan hooks install &lt;claude|grok|codex|cursor|gemini&gt;
 # example: wrap any command
 statuspan run --agent "My Agent" --job hello -- sleep 5</code></pre>
     <pre><code>curl -fsSL https://statuspan.com/llms.txt</code></pre>
