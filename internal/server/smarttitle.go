@@ -437,6 +437,10 @@ func smartLibUpstream(rel string) (*url.URL, error) {
 		raw = onnxDist("ort-wasm-simd-threaded.mjs")
 	case "ort/ort-wasm-simd-threaded.wasm", "ort-wasm-simd-threaded.wasm":
 		raw = onnxDist("ort-wasm-simd-threaded.wasm")
+	case "ort/ort-wasm-simd-threaded.jsep.mjs", "ort-wasm-simd-threaded.jsep.mjs":
+		raw = onnxDist("ort-wasm-simd-threaded.jsep.mjs")
+	case "ort/ort-wasm-simd-threaded.jsep.wasm", "ort-wasm-simd-threaded.jsep.wasm":
+		raw = onnxDist("ort-wasm-simd-threaded.jsep.wasm")
 	default:
 		return nil, errSmartPath
 	}
@@ -576,16 +580,88 @@ func hfDownloadHost(host string) bool {
 func rewriteTransformersJS(in []byte) ([]byte, error) {
 	const oldImport = `import * as ONNX_WEB from "onnxruntime-web/webgpu";`
 	const newImport = `import * as ONNX_WEB from "/api/smart-title/lib/ort.webgpu.bundle.min.mjs";`
+	const oldTensor = `import { Tensor } from "onnxruntime-common";`
+	const newTensor = `import { Tensor } from "/api/smart-title/lib/ort.webgpu.bundle.min.mjs";`
 	const oldPrefix = "https://cdn.jsdelivr.net/npm/onnxruntime-web@${ONNX_ENV.versions.web}/dist/"
 	const newPrefix = "/api/smart-title/lib/ort/"
 	s := string(in)
-	if !strings.Contains(s, oldImport) || !strings.Contains(s, oldPrefix) {
+	if !strings.Contains(s, oldImport) || !strings.Contains(s, oldTensor) || !strings.Contains(s, oldPrefix) {
 		return nil, fmt.Errorf("transformers.js layout changed")
 	}
 	s = strings.ReplaceAll(s, oldImport, newImport)
+	s = strings.ReplaceAll(s, oldTensor, newTensor)
 	s = strings.ReplaceAll(s, oldPrefix, newPrefix)
-	if strings.Contains(s, "cdn.jsdelivr.net/npm/onnxruntime") || strings.Contains(s, `from "onnxruntime-web/webgpu"`) {
+	if strings.Contains(s, "cdn.jsdelivr.net/npm/onnxruntime") ||
+		strings.Contains(s, `from "onnxruntime-web/webgpu"`) ||
+		bareONNXRuntimeCommon(s) {
 		return nil, fmt.Errorf("transformers.js rewrite incomplete")
 	}
 	return []byte(s), nil
+}
+
+// bareONNXRuntimeCommon reports a bare onnxruntime-common module specifier
+// outside comments. A mention that only appears in a comment is ignored.
+func bareONNXRuntimeCommon(src string) bool {
+	code := stripJSComments(src)
+	return strings.Contains(code, `"onnxruntime-common"`) || strings.Contains(code, `'onnxruntime-common'`)
+}
+
+func stripJSComments(src string) string {
+	var b strings.Builder
+	b.Grow(len(src))
+	for i := 0; i < len(src); {
+		switch src[i] {
+		case '"', '\'', '`':
+			i = writeJSString(&b, src, i)
+		case '/':
+			if i+1 < len(src) && (src[i+1] == '/' || src[i+1] == '*') {
+				i = skipJSComment(src, i)
+				continue
+			}
+			b.WriteByte(src[i])
+			i++
+		default:
+			b.WriteByte(src[i])
+			i++
+		}
+	}
+	return b.String()
+}
+
+func writeJSString(b *strings.Builder, src string, i int) int {
+	q := src[i]
+	b.WriteByte(q)
+	i++
+	for i < len(src) {
+		c := src[i]
+		b.WriteByte(c)
+		i++
+		if c == '\\' && i < len(src) {
+			b.WriteByte(src[i])
+			i++
+			continue
+		}
+		if c == q {
+			break
+		}
+	}
+	return i
+}
+
+func skipJSComment(src string, i int) int {
+	if strings.HasPrefix(src[i:], "//") {
+		i += 2
+		for i < len(src) && src[i] != '\n' {
+			i++
+		}
+		return i
+	}
+	i += 2
+	for i+1 < len(src) && !(src[i] == '*' && src[i+1] == '/') {
+		i++
+	}
+	if i+1 < len(src) {
+		return i + 2
+	}
+	return len(src)
 }

@@ -151,6 +151,10 @@ func TestSmartUpstreamAllowlist(t *testing.T) {
 		"ort-wasm-simd-threaded.asyncify.mjs",
 		"ort/ort-wasm-simd-threaded.wasm",
 		"ort-wasm-simd-threaded.mjs",
+		"ort/ort-wasm-simd-threaded.jsep.mjs",
+		"ort-wasm-simd-threaded.jsep.mjs",
+		"ort/ort-wasm-simd-threaded.jsep.wasm",
+		"ort-wasm-simd-threaded.jsep.wasm",
 	}
 	for _, rel := range okLib {
 		u, err := smartLibUpstream(rel)
@@ -159,6 +163,15 @@ func TestSmartUpstreamAllowlist(t *testing.T) {
 		}
 		if _, err := smartUpstream("lib", rel); err != nil {
 			t.Fatal(rel, err)
+		}
+		if strings.Contains(rel, "ort-wasm-") {
+			name := rel
+			if i := strings.LastIndex(rel, "/"); i >= 0 {
+				name = rel[i+1:]
+			}
+			if got, want := u.String(), onnxDist(name); got != want {
+				t.Fatalf("%s: got %s want %s", rel, got, want)
+			}
 		}
 	}
 	for _, rel := range []string{
@@ -257,6 +270,42 @@ func TestSmartProxyRejectsBeforeDial(t *testing.T) {
 	}
 	if deny.n != 0 {
 		t.Fatalf("bad path dialed %d", deny.n)
+	}
+}
+
+func TestRewriteTransformersJSTensorImport(t *testing.T) {
+	fixture := "" +
+		"import * as ONNX_WEB from \"onnxruntime-web/webgpu\";\n" +
+		"import { Tensor } from \"onnxruntime-common\";\n" +
+		"const prefix = \"https://cdn.jsdelivr.net/npm/onnxruntime-web@${ONNX_ENV.versions.web}/dist/\";\n" +
+		"// comment only: \"onnxruntime-common\"\n" +
+		"/* block comment only: 'onnxruntime-common' */\n"
+	out, err := rewriteTransformersJS([]byte(fixture))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(out)
+	const wantTensor = `import { Tensor } from "/api/smart-title/lib/ort.webgpu.bundle.min.mjs";`
+	const wantWebGPU = `import * as ONNX_WEB from "/api/smart-title/lib/ort.webgpu.bundle.min.mjs";`
+	if !strings.Contains(s, wantTensor) || !strings.Contains(s, wantWebGPU) {
+		t.Fatalf("imports not rewritten: %s", s)
+	}
+	if !strings.Contains(s, "/api/smart-title/lib/ort/") {
+		t.Fatalf("wasm prefix not rewritten: %s", s)
+	}
+	if strings.Contains(s, `from "onnxruntime-web/webgpu"`) || strings.Contains(s, "cdn.jsdelivr.net/npm/onnxruntime") {
+		t.Fatalf("original specifier remains: %s", s)
+	}
+	if bareONNXRuntimeCommon(s) {
+		t.Fatalf("bare onnxruntime-common remains: %s", s)
+	}
+	if !strings.Contains(s, `comment only: "onnxruntime-common"`) {
+		t.Fatal("comment mention was rewritten")
+	}
+
+	leftover := fixture + "import { env } from \"onnxruntime-common\";\n"
+	if _, err := rewriteTransformersJS([]byte(leftover)); err == nil {
+		t.Fatal("leftover bare specifier was accepted")
 	}
 }
 
