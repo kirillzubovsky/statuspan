@@ -33,27 +33,133 @@ const (
 	sessionStartSeqBackdate = 2000
 )
 
-// claudeFailMarkerDir holds one empty file per session that ended a turn in
-// StopFailure. Each hook event is a new process, so SessionEnd cannot see
-// that failure unless it is written down. Tests replace this directory.
+// claudeFailMarkerDir holds one empty file per Claude session that ended a
+// turn in StopFailure. Each hook event is a new process, so SessionEnd cannot
+// see that failure unless it is written down. Tests replace this directory.
 var claudeFailMarkerDir = filepath.Join(os.TempDir(), "statuspan-claude")
 
-// hookCmd is `statuspan hook`. Stdout stays empty: Claude feeds hook stdout
-// back into the session as context.
+// grokFailMarkerDir is the same marker for Grok sessions. Tests replace it.
+var grokFailMarkerDir = filepath.Join(os.TempDir(), "statuspan-grok")
+
+// hookAdapter is one coding tool that can report through `statuspan hook`.
+// Stdout is per tool: Claude and Grok print nothing, because those CLIs feed
+// hook stdout back into the session. A later tool can set stdout to "{}" or
+// `{"continue":true}`.
+type hookAdapter struct {
+	name               string
+	displayAgent       string
+	jobPrefix          string
+	markerDir          func() string
+	ignoreShutdownStop bool
+	mapStopCancelled   bool
+	specs              []hookEventSpec
+	stdout             string
+	locate             func(project bool, settings, home, dir string) (string, error)
+	// file is true when install writes one StatusPan-owned JSON file.
+	// Claude merges handlers into a settings object instead.
+	file bool
+}
+
+type hookOpts struct {
+	defaultAgent       string
+	product            string
+	jobPrefix          string
+	markerDir          func() string
+	ignoreShutdownStop bool
+	mapStopCancelled   bool
+}
+
+func hookRegistry() []hookAdapter {
+	return []hookAdapter{claudeAdapter(), grokAdapter()}
+}
+
+func claudeAdapter() hookAdapter {
+	return hookAdapter{
+		name:         "claude",
+		displayAgent: defaultHookAgent,
+		jobPrefix:    "claude",
+		markerDir:    func() string { return claudeFailMarkerDir },
+		specs:        claudeHookSpecs(),
+		locate:       claudeSettingsPath,
+	}
+}
+
+func grokAdapter() hookAdapter {
+	return hookAdapter{
+		name:               "grok",
+		displayAgent:       "Grok",
+		jobPrefix:          "grok",
+		markerDir:          func() string { return grokFailMarkerDir },
+		ignoreShutdownStop: true,
+		mapStopCancelled:   true,
+		specs:              grokHookSpecs(),
+		locate:             grokHooksPath,
+		file:               true,
+	}
+}
+
+func (a hookAdapter) hookOpts() hookOpts {
+	return hookOpts{
+		defaultAgent:       a.displayAgent,
+		product:            a.displayAgent,
+		jobPrefix:          a.jobPrefix,
+		markerDir:          a.markerDir,
+		ignoreShutdownStop: a.ignoreShutdownStop,
+		mapStopCancelled:   a.mapStopCancelled,
+	}
+}
+
+func lookupHookAdapter(name string) (hookAdapter, bool) {
+	for _, a := range hookRegistry() {
+		if a.name == name {
+			return a, true
+		}
+	}
+	return hookAdapter{}, false
+}
+
+func supportedHookTools() string {
+	names := make([]string, 0, len(hookRegistry()))
+	for _, a := range hookRegistry() {
+		names = append(names, a.name)
+	}
+	return strings.Join(names, ", ")
+}
+
+func unknownHookTool(name string) error {
+	supported := supportedHookTools()
+	if strings.TrimSpace(name) == "" {
+		return &exitError{code: 2, err: fmt.Errorf("unknown tool (supported: %s)", supported)}
+	}
+	return &exitError{code: 2, err: fmt.Errorf("unknown tool %q (supported: %s)", name, supported)}
+}
+
+// hookCmd is `statuspan hook <tool>`. An unknown tool exits 0 and prints
+// nothing so a mis-installed hook cannot break the agent. Grok also executes
+// Claude and Cursor hook files; GROK_HOOK_EVENT means this process is Grok
+// even when the command says `hook claude`.
 func hookCmd(args []string) error {
 	if len(args) == 0 || isHelpArg(args[0]) {
 		usage()
 		return nil
 	}
-	if args[0] != "claude" {
-		return fmt.Errorf("unknown hook %q (try statuspan hook claude)", args[0])
+	invoked := args[0]
+	adapter, ok := lookupHookAdapter(invoked)
+	if strings.TrimSpace(os.Getenv("GROK_HOOK_EVENT")) != "" {
+		if g, gok := lookupHookAdapter("grok"); gok {
+			adapter = g
+			ok = true
+		}
 	}
-	return hookClaude(args[1:])
+	if !ok {
+		return nil
+	}
+	return runHookAdapter(adapter, invoked, args[1:])
 }
 
-func hookClaude(args []string) error {
-	fs := newFlagSet("hook claude")
-	agent := fs.String("agent", envOr("STATUSPAN_AGENT", defaultHookAgent), "agent name (default STATUSPAN_AGENT or \"Claude Code\")")
+func runHookAdapter(adapter hookAdapter, invoked string, args []string) error {
+	fs := newFlagSet("hook " + invoked)
+	agent := fs.String("agent", envOr("STATUSPAN_AGENT", adapter.displayAgent), "agent name (default STATUSPAN_AGENT or the tool's display name)")
 	jobURL := fs.String("url", "", "full jobs endpoint (overrides --addr; env STATUSPAN_URL)")
 	addr := fs.String("addr", envOr("STATUSPAN_ADDR", server.DefaultAddr), "server address")
 	relayURL := fs.String("relay", "", "post to this relay instead of the local daemon")
@@ -82,13 +188,16 @@ func hookClaude(args []string) error {
 		}
 		fmt.Fprintf(os.Stderr, "statuspan: %s\n", msg)
 	}
-	if err := postClaudeHook(seen, strings.TrimSpace(*agent), *jobURL, *addr, *relayURL, *workspace, *token, *tokenFile); err != nil {
+	if err := postHook(adapter, seen, strings.TrimSpace(*agent), *jobURL, *addr, *relayURL, *workspace, *token, *tokenFile); err != nil {
 		warn(err)
+	}
+	if adapter.stdout != "" {
+		fmt.Fprint(os.Stdout, adapter.stdout)
 	}
 	return nil
 }
 
-func postClaudeHook(seen map[string]bool, agent, jobURL, addr, relayURL, workspace, token, tokenFile string) error {
+func postHook(adapter hookAdapter, seen map[string]bool, agent, jobURL, addr, relayURL, workspace, token, tokenFile string) error {
 	started := time.Now()
 	body, err := readHookStdin(hookOverallTimeout)
 	if err != nil {
@@ -102,9 +211,9 @@ func postClaudeHook(seen map[string]bool, agent, jobURL, addr, relayURL, workspa
 		return err
 	}
 	if agent == "" {
-		agent = defaultHookAgent
+		agent = adapter.displayAgent
 	}
-	update, ok := claudeUpdate(in, agent)
+	update, ok := adapter.update(in, agent)
 	if !ok {
 		return nil
 	}
@@ -181,22 +290,33 @@ func (f *flexBool) UnmarshalJSON(data []byte) error {
 }
 
 type claudeHookInput struct {
-	SessionID            flexString      `json:"session_id"`
-	Cwd                  flexString      `json:"cwd"`
-	HookEventName        flexString      `json:"hook_event_name"`
-	AgentID              flexString      `json:"agent_id"`
-	Prompt               flexString      `json:"prompt"`
-	ToolName             flexString      `json:"tool_name"`
-	ToolInput            json.RawMessage `json:"tool_input"`
-	Message              flexString      `json:"message"`
-	NotificationType     flexString      `json:"notification_type"`
-	LastAssistantMessage flexString      `json:"last_assistant_message"`
-	StopHookActive       flexBool        `json:"stop_hook_active"`
-	BackgroundTasks      json.RawMessage `json:"background_tasks"`
-	Error                flexString      `json:"error"`
-	ErrorDetails         json.RawMessage `json:"error_details"`
-	Source               flexString      `json:"source"`
-	Reason               flexString      `json:"reason"`
+	SessionID               flexString      `json:"session_id"`
+	SessionIDAlt            flexString      `json:"sessionId"`
+	Cwd                     flexString      `json:"cwd"`
+	WorkspaceRoot           flexString      `json:"workspaceRoot"`
+	HookEventName           flexString      `json:"hook_event_name"`
+	HookEventNameAlt        flexString      `json:"hookEventName"`
+	AgentID                 flexString      `json:"agent_id"`
+	AgentIDAlt              flexString      `json:"agentId"`
+	Prompt                  flexString      `json:"prompt"`
+	ToolName                flexString      `json:"tool_name"`
+	ToolNameAlt             flexString      `json:"toolName"`
+	ToolInput               json.RawMessage `json:"tool_input"`
+	ToolInputAlt            json.RawMessage `json:"toolInput"`
+	Message                 flexString      `json:"message"`
+	NotificationType        flexString      `json:"notification_type"`
+	NotificationTypeAlt     flexString      `json:"notificationType"`
+	LastAssistantMessage    flexString      `json:"last_assistant_message"`
+	LastAssistantMessageAlt flexString      `json:"lastAssistantMessage"`
+	StopHookActive          flexBool        `json:"stop_hook_active"`
+	StopHookActiveAlt       flexBool        `json:"stopHookActive"`
+	BackgroundTasks         json.RawMessage `json:"background_tasks"`
+	BackgroundTasksAlt      json.RawMessage `json:"backgroundTasks"`
+	Error                   flexString      `json:"error"`
+	ErrorDetails            json.RawMessage `json:"error_details"`
+	ErrorDetailsAlt         json.RawMessage `json:"errorDetails"`
+	Source                  flexString      `json:"source"`
+	Reason                  flexString      `json:"reason"`
 }
 
 func parseClaudeHook(body []byte) (claudeHookInput, error) {
@@ -208,17 +328,92 @@ func parseClaudeHook(body []byte) (claudeHookInput, error) {
 	return in, nil
 }
 
+// normalizeHookInput fills snake_case fields from camelCase when the snake
+// key is missing. Grok sends both. hook_event_name is PascalCase
+// ("PreToolUse"); hookEventName is snake_case ("pre_tool_use").
+func normalizeHookInput(in claudeHookInput) claudeHookInput {
+	in.SessionID = firstFlex(in.SessionID, in.SessionIDAlt)
+	in.Cwd = firstFlex(in.Cwd, in.WorkspaceRoot)
+	if strings.TrimSpace(string(in.HookEventName)) == "" {
+		in.HookEventName = flexString(normalizeEventName(string(in.HookEventNameAlt)))
+	}
+	in.AgentID = firstFlex(in.AgentID, in.AgentIDAlt)
+	in.ToolName = firstFlex(in.ToolName, in.ToolNameAlt)
+	if rawEmpty(in.ToolInput) {
+		in.ToolInput = in.ToolInputAlt
+	}
+	in.NotificationType = firstFlex(in.NotificationType, in.NotificationTypeAlt)
+	in.LastAssistantMessage = firstFlex(in.LastAssistantMessage, in.LastAssistantMessageAlt)
+	if !bool(in.StopHookActive) {
+		in.StopHookActive = in.StopHookActiveAlt
+	}
+	if rawEmpty(in.BackgroundTasks) {
+		in.BackgroundTasks = in.BackgroundTasksAlt
+	}
+	if rawEmpty(in.ErrorDetails) {
+		in.ErrorDetails = in.ErrorDetailsAlt
+	}
+	return in
+}
+
+func firstFlex(primary, fallback flexString) flexString {
+	if strings.TrimSpace(string(primary)) != "" {
+		return primary
+	}
+	return fallback
+}
+
+func normalizeEventName(name string) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return ""
+	}
+	if strings.Contains(name, "_") || name == strings.ToLower(name) {
+		return snakeToPascal(name)
+	}
+	return name
+}
+
+func snakeToPascal(s string) string {
+	var b strings.Builder
+	for _, part := range strings.Split(s, "_") {
+		if part == "" {
+			continue
+		}
+		r := []rune(strings.ToLower(part))
+		r[0] = unicode.ToUpper(r[0])
+		b.WriteString(string(r))
+	}
+	return b.String()
+}
+
 // claudeUpdate maps one Claude Code hook payload to a store update.
 // ok is false when the event should not be posted.
 func claudeUpdate(in claudeHookInput, agent string) (store.Update, bool) {
+	return claudeAdapter().update(in, agent)
+}
+
+// grokUpdate maps one Grok CLI hook payload. It follows Claude, and also
+// ignores a shutdown Stop and records StopCancelled.
+func grokUpdate(in claudeHookInput, agent string) (store.Update, bool) {
+	return grokAdapter().update(in, agent)
+}
+
+func (a hookAdapter) update(in claudeHookInput, agent string) (store.Update, bool) {
+	return mapSessionHook(normalizeHookInput(in), agent, a.hookOpts())
+}
+
+// mapSessionHook maps one Claude-shaped hook payload. ok is false when the
+// event should not be posted.
+func mapSessionHook(in claudeHookInput, agent string, opts hookOpts) (store.Update, bool) {
 	sessionID := strings.TrimSpace(string(in.SessionID))
 	if sessionID == "" {
 		return store.Update{}, false
 	}
 	if strings.TrimSpace(agent) == "" {
-		agent = defaultHookAgent
+		agent = opts.defaultAgent
 	}
-	jobID, ok := claudeJobID(string(in.Cwd), sessionID)
+	jobID, ok := hookJobID(opts.jobPrefix, string(in.Cwd), sessionID)
 	if !ok {
 		return store.Update{}, false
 	}
@@ -226,6 +421,17 @@ func claudeUpdate(in claudeHookInput, agent string) (store.Update, bool) {
 	subagent := strings.TrimSpace(string(in.AgentID)) != ""
 	if subagent && event != "PreToolUse" {
 		return store.Update{}, false
+	}
+	markerDir := ""
+	if opts.markerDir != nil {
+		markerDir = opts.markerDir()
+	}
+	if strings.TrimSpace(markerDir) == "" {
+		prefix := opts.jobPrefix
+		if prefix == "" {
+			prefix = "claude"
+		}
+		markerDir = filepath.Join(os.TempDir(), "statuspan-"+prefix)
 	}
 
 	var (
@@ -238,12 +444,12 @@ func claudeUpdate(in claudeHookInput, agent string) (store.Update, bool) {
 	switch event {
 	case "SessionStart":
 		state = "queued"
-		title = sessionTitle(string(in.Cwd))
+		title = sessionTitle(string(in.Cwd), opts.product)
 		hasTitle = true
 		note = withDetail("Session started", string(in.Source))
 	case "UserPromptSubmit":
 		// A new turn means the earlier API error is no longer how the session ended.
-		removeClaudeFailMarker(sessionID)
+		removeFailMarker(markerDir, sessionID)
 		state = "running"
 		note = "Working on the prompt"
 		if t, ok := promptTitle(string(in.Prompt)); ok {
@@ -257,7 +463,7 @@ func claudeUpdate(in claudeHookInput, agent string) (store.Update, bool) {
 			note = "Subagent: " + note
 			note = truncateRunes(collapse(note), hookNoteMax, false)
 		}
-	case "PostToolUse", "PostToolUseFailure":
+	case "PostToolUse", "PostToolUseFailure", "PermissionDenied":
 		return store.Update{}, false
 	case "Notification":
 		switch string(in.NotificationType) {
@@ -272,6 +478,11 @@ func claudeUpdate(in claudeHookInput, agent string) (store.Update, bool) {
 			return store.Update{}, false
 		}
 	case "Stop":
+		// Grok fires one more Stop after SessionEnd, with reason shutdown and
+		// no assistant message. That is not a turn finishing.
+		if opts.ignoreShutdownStop && strings.EqualFold(collapse(string(in.Reason)), "shutdown") {
+			return store.Update{}, false
+		}
 		if bool(in.StopHookActive) {
 			return store.Update{}, false
 		}
@@ -283,17 +494,24 @@ func claudeUpdate(in claudeHookInput, agent string) (store.Update, bool) {
 			hundred := 100
 			progress = &hundred
 			note = turnFinishedNote(string(in.LastAssistantMessage))
-			removeClaudeFailMarker(sessionID)
+			removeFailMarker(markerDir, sessionID)
 		}
 	case "StopFailure":
 		state = "failed"
 		note = failureNote(string(in.Error), rawJSONText(in.ErrorDetails))
-		writeClaudeFailMarker(sessionID)
+		writeFailMarker(markerDir, sessionID)
+	case "StopCancelled":
+		if !opts.mapStopCancelled {
+			return store.Update{}, false
+		}
+		removeFailMarker(markerDir, sessionID)
+		state = "done"
+		note = withDetail("Turn stopped", string(in.Reason))
 	case "SessionEnd":
-		if claudeFailMarkerExists(sessionID) {
+		if failMarkerExists(markerDir, sessionID) {
 			state = "failed"
 			note = withDetail("Session ended after an API error", string(in.Reason))
-			removeClaudeFailMarker(sessionID)
+			removeFailMarker(markerDir, sessionID)
 		} else {
 			state = "done"
 			note = withDetail("Session ended", string(in.Reason))
@@ -342,44 +560,43 @@ func newHookUpdate(agent, jobID, state, title string, hasTitle bool, note string
 	return u
 }
 
-func claudeFailMarkerPath(sessionID string) (string, bool) {
+func failMarkerPath(dir, sessionID string) (string, bool) {
 	slug := slugify(strings.TrimSpace(sessionID), 0)
 	if slug == "" {
 		return "", false
 	}
-	dir := claudeFailMarkerDir
 	if strings.TrimSpace(dir) == "" {
 		dir = filepath.Join(os.TempDir(), "statuspan-claude")
 	}
 	return filepath.Join(dir, slug+".failed"), true
 }
 
-func writeClaudeFailMarker(sessionID string) {
-	path, ok := claudeFailMarkerPath(sessionID)
+func writeFailMarker(dir, sessionID string) {
+	path, ok := failMarkerPath(dir, sessionID)
 	if !ok {
 		return
 	}
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+	parent := filepath.Dir(path)
+	if err := os.MkdirAll(parent, 0o700); err != nil {
 		return
 	}
-	_ = os.Chmod(dir, 0o700)
+	_ = os.Chmod(parent, 0o700)
 	if err := os.WriteFile(path, nil, 0o600); err != nil {
 		return
 	}
 	_ = os.Chmod(path, 0o600)
 }
 
-func removeClaudeFailMarker(sessionID string) {
-	path, ok := claudeFailMarkerPath(sessionID)
+func removeFailMarker(dir, sessionID string) {
+	path, ok := failMarkerPath(dir, sessionID)
 	if !ok {
 		return
 	}
 	_ = os.Remove(path)
 }
 
-func claudeFailMarkerExists(sessionID string) bool {
-	path, ok := claudeFailMarkerPath(sessionID)
+func failMarkerExists(dir, sessionID string) bool {
+	path, ok := failMarkerPath(dir, sessionID)
 	if !ok {
 		return false
 	}
@@ -388,8 +605,13 @@ func claudeFailMarkerExists(sessionID string) bool {
 }
 
 func claudeJobID(cwd, sessionID string) (string, bool) {
+	return hookJobID("claude", cwd, sessionID)
+}
+
+func hookJobID(prefix, cwd, sessionID string) (string, bool) {
 	sessionID = strings.TrimSpace(sessionID)
-	if sessionID == "" {
+	prefix = strings.TrimSpace(prefix)
+	if sessionID == "" || prefix == "" {
 		return "", false
 	}
 	folder := slugify(folderLabel(cwd), 32)
@@ -404,7 +626,7 @@ func claudeJobID(cwd, sessionID string) (string, bool) {
 	if sess == "" {
 		return "", false
 	}
-	return "claude-" + folder + "-" + sess, true
+	return prefix + "-" + folder + "-" + sess, true
 }
 
 func folderLabel(cwd string) string {
@@ -419,12 +641,16 @@ func folderLabel(cwd string) string {
 	return base
 }
 
-func sessionTitle(cwd string) string {
+func sessionTitle(cwd, product string) string {
+	product = strings.TrimSpace(product)
+	if product == "" {
+		product = defaultHookAgent
+	}
 	folder := folderLabel(cwd)
 	if folder == "" {
-		return "Claude Code session"
+		return product + " session"
 	}
-	return folder + ": Claude Code session"
+	return folder + ": " + product + " session"
 }
 
 func slugify(s string, max int) string {
@@ -566,8 +792,13 @@ func truncateRunes(s string, max int, ellipsis bool) string {
 	return string(r[:cut]) + "…"
 }
 
+func rawEmpty(raw json.RawMessage) bool {
+	raw = bytes.TrimSpace(raw)
+	return len(raw) == 0 || bytes.Equal(raw, []byte("null"))
+}
+
 func toolObject(raw json.RawMessage) map[string]any {
-	if len(bytes.TrimSpace(raw)) == 0 || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+	if rawEmpty(raw) {
 		return map[string]any{}
 	}
 	var m map[string]any
@@ -609,6 +840,11 @@ func rawJSONText(raw json.RawMessage) string {
 }
 
 func toolProgress(cwd, tool string, input map[string]any) string {
+	// Other CLIs use snake_case names. Claude's own names stay on the switch
+	// below, including Glob (not List) and Bash (not "Run:").
+	if label, ok := friendlyVerb(strings.TrimSpace(tool)); ok {
+		return sanitizeText(genericProgress(cwd, label, input), hookNoteMax)
+	}
 	canon := canonicalTool(tool)
 	var note string
 	switch canon {
@@ -621,12 +857,7 @@ func toolProgress(cwd, tool string, input map[string]any) string {
 		}
 		note = joinTool("NotebookEdit", displayPath(cwd, path))
 	case "Bash":
-		cmd := sanitizeText(firstLine(asString(input["command"])), 80)
-		if cmd == "" {
-			note = "Bash"
-		} else {
-			note = "Bash: " + cmd
-		}
+		note = commandNote("Bash", asString(input["command"]))
 	case "Grep", "Glob":
 		note = sanitizeText(canon+" "+asString(input["pattern"]), 60)
 	case "WebFetch":
@@ -650,6 +881,8 @@ func toolProgress(cwd, tool string, input map[string]any) string {
 	default:
 		if mcp, ok := mcpProgress(tool); ok {
 			note = mcp
+		} else if n, ok := genericFields(cwd, strings.TrimSpace(tool), input); ok {
+			note = n
 		} else if strings.TrimSpace(tool) == "" {
 			note = "Tool"
 		} else {
@@ -657,6 +890,105 @@ func toolProgress(cwd, tool string, input map[string]any) string {
 		}
 	}
 	return sanitizeText(note, hookNoteMax)
+}
+
+// friendlyVerb maps non-Claude tool names to a short verb. Claude's PascalCase
+// names are handled separately so "Glob" stays Glob and "Bash" stays Bash.
+// The lowercase tool name "glob" is List.
+func friendlyVerb(name string) (string, bool) {
+	if name == "glob" {
+		return "List", true
+	}
+	switch strings.ToLower(name) {
+	case "read_file":
+		return "Read", true
+	case "search_replace", "edit_file", "replace":
+		return "Edit", true
+	case "write_file", "create_file":
+		return "Write", true
+	case "run_terminal_command", "run_shell_command", "shell", "exec_command":
+		return "Run", true
+	case "grep_search", "search_file_content":
+		return "Grep", true
+	case "list_dir", "list_directory":
+		return "List", true
+	case "web_fetch":
+		return "WebFetch", true
+	case "web_search", "google_web_search":
+		return "WebSearch", true
+	default:
+		return "", false
+	}
+}
+
+func genericProgress(cwd, label string, input map[string]any) string {
+	if note, ok := genericFields(cwd, label, input); ok {
+		return note
+	}
+	if strings.TrimSpace(label) == "" {
+		return "Tool"
+	}
+	return label
+}
+
+// genericFields formats a tool call from common input keys. A command string
+// is "Run: ..." except for Claude's Bash, which never reaches this helper.
+func genericFields(cwd, label string, input map[string]any) (string, bool) {
+	if cmd, ok := inputString(input, "command"); ok && strings.TrimSpace(cmd) != "" {
+		return commandNote("Run", cmd), true
+	}
+	if path, ok := firstInputString(input, "file_path", "target_file", "path", "absolute_path", "notebook_path"); ok && strings.TrimSpace(path) != "" {
+		return joinTool(toolLabel(label), displayPath(cwd, path)), true
+	}
+	if v, ok := firstInputString(input, "pattern", "query"); ok && strings.TrimSpace(v) != "" {
+		return sanitizeText(toolLabel(label)+" "+v, 60), true
+	}
+	if raw, ok := inputString(input, "url"); ok && strings.TrimSpace(raw) != "" {
+		host := urlHost(raw)
+		if host == "" {
+			return toolLabel(label), true
+		}
+		return joinTool(toolLabel(label), host), true
+	}
+	return "", false
+}
+
+func toolLabel(label string) string {
+	label = strings.TrimSpace(label)
+	if label == "" {
+		return "Tool"
+	}
+	return label
+}
+
+func commandNote(prefix, command string) string {
+	cmd := sanitizeText(firstLine(command), 80)
+	if cmd == "" {
+		return prefix
+	}
+	return prefix + ": " + cmd
+}
+
+func inputString(input map[string]any, key string) (string, bool) {
+	v, ok := input[key]
+	if !ok || v == nil {
+		return "", false
+	}
+	s, ok := v.(string)
+	if !ok {
+		return "", false
+	}
+	return s, true
+}
+
+func firstInputString(input map[string]any, keys ...string) (string, bool) {
+	for _, key := range keys {
+		s, ok := inputString(input, key)
+		if ok && strings.TrimSpace(s) != "" {
+			return s, true
+		}
+	}
+	return "", false
 }
 
 func joinTool(tool, path string) string {
@@ -880,9 +1212,9 @@ func hooksAction(action string, args []string) error {
 		return err
 	}
 	fs := newFlagSet("hooks " + action)
-	project := fs.Bool("project", false, "write ./.claude/settings.json (relative to --dir)")
+	project := fs.Bool("project", false, "write the project hooks file (relative to --dir)")
 	settings := fs.String("settings", "", "settings file to edit")
-	home := fs.String("home", "", "home directory for ~/.claude/settings.json")
+	home := fs.String("home", "", "home directory (default is the user home)")
 	dir := fs.String("dir", "", "base directory for --project")
 	dry := fs.Bool("dry-run", false, "print the resulting JSON and write nothing")
 	binFlag := fs.String("bin", "", "statuspan binary path to write into the hook command")
@@ -891,19 +1223,22 @@ func hooksAction(action string, args []string) error {
 	relayURL := fs.String("relay", "", "relay URL baked into the hook command")
 	workspace := fs.String("workspace", "", "relay workspace baked into the hook command")
 	tokenFile := fs.String("token-file", "", "relay token file baked into the hook command")
-	rest, foundClaude := peelClaudeArg(args)
+	rest, toolName := peelToolArg(args)
 	if err := fs.Parse(rest); err != nil {
 		return err
 	}
-	if !foundClaude {
-		if len(fs.Args()) == 1 && fs.Args()[0] == "claude" {
-			foundClaude = true
+	if toolName == "" {
+		if len(fs.Args()) == 1 {
+			toolName = fs.Args()[0]
+		} else if len(fs.Args()) > 1 {
+			return fmt.Errorf("unexpected argument %q", fs.Args()[1])
 		}
 	} else if len(fs.Args()) != 0 {
-		return fmt.Errorf("hooks %s requires claude", action)
+		return fmt.Errorf("unexpected argument %q", fs.Args()[0])
 	}
-	if !foundClaude {
-		return fmt.Errorf("hooks %s requires claude", action)
+	adapter, ok := lookupHookAdapter(toolName)
+	if !ok {
+		return unknownHookTool(toolName)
 	}
 	seen := map[string]bool{}
 	fs.Visit(func(f *flag.Flag) { seen[f.Name] = true })
@@ -911,10 +1246,17 @@ func hooksAction(action string, args []string) error {
 	if err != nil {
 		return err
 	}
-	command := hookCommand(bin, bakedHookFlags(seen, *jobURL, *addr, *relayURL, *workspace, *tokenFile))
+	command := hookCommand(bin, adapter.name, bakedHookFlags(seen, *jobURL, *addr, *relayURL, *workspace, *tokenFile))
+	if adapter.file {
+		return grokHooksAction(action, adapter.specs, command, bin, *project, *settings, *home, *dir, *dry)
+	}
+	return claudeHooksAction(action, adapter, command, bin, *project, *settings, *home, *dir, *dry)
+}
+
+func claudeHooksAction(action string, adapter hookAdapter, command, bin string, project bool, settings, home, dir string, dry bool) error {
 	if action == "print" {
 		doc := map[string]any{}
-		if err := mergeClaudeHooks(doc, command, bin, false); err != nil {
+		if err := mergeClaudeHooks(doc, adapter.specs, command, bin, false); err != nil {
 			return err
 		}
 		data, err := marshalSettings(doc)
@@ -924,7 +1266,7 @@ func hooksAction(action string, args []string) error {
 		fmt.Fprint(os.Stdout, string(data))
 		return nil
 	}
-	path, err := claudeSettingsPath(*project, *settings, *home, *dir)
+	path, err := adapter.locate(project, settings, home, dir)
 	if err != nil {
 		return err
 	}
@@ -932,14 +1274,14 @@ func hooksAction(action string, args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := mergeClaudeHooks(doc, command, bin, action == "uninstall"); err != nil {
+	if err := mergeClaudeHooks(doc, adapter.specs, command, bin, action == "uninstall"); err != nil {
 		return err
 	}
 	data, err := marshalSettings(doc)
 	if err != nil {
 		return err
 	}
-	if *dry {
+	if dry {
 		fmt.Fprint(os.Stdout, string(data))
 		return nil
 	}
@@ -950,13 +1292,13 @@ func hooksAction(action string, args []string) error {
 	return writeClaudeSettings(path, data, existed)
 }
 
-// peelClaudeArg accepts "claude" before flags (`hooks install claude --project`).
+// peelToolArg accepts the tool before flags (`hooks install claude --project`).
 // Flags-then-positional still works: the leftover arg is checked after Parse.
-func peelClaudeArg(args []string) ([]string, bool) {
-	if len(args) > 0 && args[0] == "claude" {
-		return args[1:], true
+func peelToolArg(args []string) ([]string, string) {
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		return args[1:], args[0]
 	}
-	return args, false
+	return args, ""
 }
 
 func refuseBakedToken(args []string) error {
@@ -971,7 +1313,7 @@ func refuseBakedToken(args []string) error {
 		}
 		name, _, _ = strings.Cut(name, "=")
 		if name == "token" {
-			return fmt.Errorf("refusing to store --token in Claude settings; use --token-file or STATUSPAN_TOKEN")
+			return fmt.Errorf("refusing to store --token in hook settings; use --token-file or STATUSPAN_TOKEN")
 		}
 	}
 	return nil
@@ -1016,9 +1358,9 @@ func bakedHookFlags(seen map[string]bool, jobURL, addr, relayURL, workspace, tok
 	return out
 }
 
-func hookCommand(bin string, flags []string) string {
+func hookCommand(bin, tool string, flags []string) string {
 	parts := make([]string, 0, 3+len(flags))
-	parts = append(parts, quoteArg(bin), "hook", "claude")
+	parts = append(parts, quoteArg(bin), "hook", tool)
 	parts = append(parts, flags...)
 	return strings.Join(parts, " ")
 }
@@ -1110,7 +1452,163 @@ func claudeHookSpecs() []hookEventSpec {
 	}
 }
 
-func mergeClaudeHooks(doc map[string]any, command, bin string, removeOnly bool) error {
+func grokHookSpecs() []hookEventSpec {
+	return []hookEventSpec{
+		{name: "SessionStart", timeout: 3},
+		{name: "UserPromptSubmit", timeout: 3},
+		{name: "PreToolUse", matcher: "*", timeout: 3},
+		{name: "Notification", matcher: "permission_prompt", timeout: 3},
+		{name: "Stop", timeout: 5},
+		{name: "StopFailure", timeout: 5},
+		{name: "StopCancelled", timeout: 5},
+		{name: "SessionEnd", timeout: 3},
+	}
+}
+
+func grokHooksPath(project bool, settings, home, dir string) (string, error) {
+	if strings.TrimSpace(settings) != "" {
+		return settings, nil
+	}
+	if project {
+		base := strings.TrimSpace(dir)
+		if base == "" {
+			var err error
+			base, err = os.Getwd()
+			if err != nil {
+				return "", err
+			}
+		}
+		return filepath.Join(base, ".grok", "hooks", "statuspan.json"), nil
+	}
+	h := strings.TrimSpace(home)
+	if h == "" {
+		var err error
+		h, err = os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("home directory: %w", err)
+		}
+	}
+	return filepath.Join(h, ".grok", "hooks", "statuspan.json"), nil
+}
+
+func grokHooksAction(action string, specs []hookEventSpec, command, bin string, project bool, settings, home, dir string, dry bool) error {
+	doc := map[string]any{}
+	if err := mergeOwnedHooks(doc, specs, command); err != nil {
+		return err
+	}
+	data, err := marshalSettings(doc)
+	if err != nil {
+		return err
+	}
+	if action == "print" {
+		fmt.Fprint(os.Stdout, string(data))
+		if project {
+			fmt.Fprintln(os.Stderr, grokProjectTrustHint)
+		}
+		return nil
+	}
+	path, err := grokHooksPath(project, settings, home, dir)
+	if err != nil {
+		return err
+	}
+	existed, err := os.ReadFile(path)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if err == nil && !grokFileOwned(existed, bin) {
+		if action == "uninstall" {
+			return fmt.Errorf("refusing to remove %s: not a StatusPan hook file", path)
+		}
+		return fmt.Errorf("refusing to overwrite %s: not a StatusPan hook file", path)
+	}
+	missing := errors.Is(err, os.ErrNotExist)
+	if dry {
+		if action == "uninstall" {
+			if missing {
+				fmt.Fprintf(os.Stderr, "No hooks file at %s\n", path)
+			}
+			return nil
+		}
+		fmt.Fprint(os.Stdout, string(data))
+		if project {
+			fmt.Fprintln(os.Stderr, grokProjectTrustHint)
+		}
+		return nil
+	}
+	if action == "uninstall" {
+		if missing {
+			fmt.Fprintf(os.Stderr, "No hooks file at %s\n", path)
+			return nil
+		}
+		if err := os.Remove(path); err != nil {
+			return err
+		}
+		fmt.Fprintf(os.Stderr, "Removed %s\n", path)
+		return nil
+	}
+	var backup string
+	if !missing {
+		backup, err = writeSettingsBackup(path, existed)
+		if err != nil {
+			return err
+		}
+	}
+	if err := writeSettingsAtomic(path, data); err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stderr, "Updated %s\n", path)
+	if backup != "" {
+		fmt.Fprintf(os.Stderr, "Backup %s\n", backup)
+	}
+	if project {
+		fmt.Fprintln(os.Stderr, grokProjectTrustHint)
+	}
+	return nil
+}
+
+const grokProjectTrustHint = "Project hooks in Grok need folder trust (`/hooks-trust` or `--trust`)."
+
+func mergeOwnedHooks(doc map[string]any, specs []hookEventSpec, command string) error {
+	hooks := map[string]any{}
+	for _, spec := range specs {
+		if err := appendHookGroup(hooks, spec, command); err != nil {
+			return err
+		}
+	}
+	doc["hooks"] = hooks
+	return nil
+}
+
+func grokFileOwned(data []byte, bin string) bool {
+	var v any
+	if err := json.Unmarshal(data, &v); err != nil {
+		return false
+	}
+	return walkStatuspanHook(v, "grok", bin)
+}
+
+func walkStatuspanHook(v any, tool, bin string) bool {
+	switch t := v.(type) {
+	case map[string]any:
+		if cmd, ok := t["command"].(string); ok && isStatuspanHook(cmd, tool, bin) {
+			return true
+		}
+		for _, child := range t {
+			if walkStatuspanHook(child, tool, bin) {
+				return true
+			}
+		}
+	case []any:
+		for _, child := range t {
+			if walkStatuspanHook(child, tool, bin) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func mergeClaudeHooks(doc map[string]any, specs []hookEventSpec, command, bin string, removeOnly bool) error {
 	hooks, err := hooksObject(doc)
 	if err != nil {
 		return err
@@ -1119,7 +1617,7 @@ func mergeClaudeHooks(doc map[string]any, command, bin string, removeOnly bool) 
 		return err
 	}
 	if !removeOnly {
-		for _, spec := range claudeHookSpecs() {
+		for _, spec := range specs {
 			if err := appendHookGroup(hooks, spec, command); err != nil {
 				return err
 			}
@@ -1230,7 +1728,11 @@ func appendHookGroup(hooks map[string]any, spec hookEventSpec, command string) e
 }
 
 func isStatuspanClaudeHook(command, bin string) bool {
-	if !strings.Contains(command, " hook claude") {
+	return isStatuspanHook(command, "claude", bin)
+}
+
+func isStatuspanHook(command, tool, bin string) bool {
+	if !strings.Contains(command, " hook "+tool) {
 		return false
 	}
 	argv := splitShellWords(command)

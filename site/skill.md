@@ -118,7 +118,7 @@ statuspan run --agent "My Agent" --job build-1 --title "Build v1" -- make test
 statuspan run --recurring --agent "My Agent" --job digest --title "Daily digest" -- python digest.py
 ```
 
-If you are Claude Code and `statuspan hooks install claude` has been run, your session is reported automatically; still post meaningful titles and progress yourself when useful. The hook only posts status. It does not print into the session and it does not block.
+If you are Claude Code or Grok and `statuspan hooks install <tool>` has been run (`claude` or `grok`), your session is reported automatically; still post meaningful titles and progress yourself when useful. The hook only posts status. It does not print into the session and it does not block.
 
 The default agent is `STATUSPAN_AGENT`. The title defaults to the job id. `--ttl` is the heartbeat window in seconds (default 600). The heartbeat interval defaults to `min(ttl/2, 60s)` and is at least 10 seconds. `--heartbeat SEC` replaces that interval with no floor (tests use `1`). `--link` is optional.
 

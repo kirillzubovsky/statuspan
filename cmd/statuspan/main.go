@@ -125,10 +125,10 @@ Usage:
   statuspan run --agent NAME --job ID [--title T] [--ttl SEC] [--heartbeat SEC] [--link URL] [--recurring]
             [--url ENDPOINT | --addr host:port | --relay URL --workspace NAME (--token TOKEN | --token-file PATH)]
             [--verbose] -- COMMAND [ARGS...]
-  statuspan hook claude [--agent NAME]
+  statuspan hook <tool> [--agent NAME]
             [--url ENDPOINT | --addr host:port | --relay URL --workspace NAME (--token TOKEN | --token-file PATH)]
             [--verbose]
-  statuspan hooks install|uninstall|print claude [--project] [--settings PATH] [--home PATH] [--dir PATH]
+  statuspan hooks install|uninstall|print <tool> [--project] [--settings PATH] [--home PATH] [--dir PATH]
             [--dry-run] [--bin PATH]
             [--url ENDPOINT | --addr host:port | --relay URL --workspace NAME --token-file PATH]
   statuspan agent [print|prompt|json|install] [--target LIST] [--dir PATH] [--home PATH] [--dry-run]
@@ -141,7 +141,7 @@ AI agents: run 'statuspan agent' for instructions or 'statuspan agent install' t
 Relay sync is optional. With no relay flags, environment, or data-dir relay.json, the daemon stays local.
 post, run, and hook talk to the local daemon unless --relay / --workspace / --token (or STATUSPAN_RELAY_URL, STATUSPAN_RELAY_WORKSPACE, STATUSPAN_TOKEN, STATUSPAN_TOKEN_FILE) are set.
 STATUSPAN_URL, or --url, is the full local jobs endpoint. STATUSPAN_AGENT is the default for --agent on run and hook.
-hooks install writes Claude Code lifecycle hooks. It refuses --token; use --token-file or STATUSPAN_TOKEN. hook claude prints nothing on stdout and exits 0.
+hooks install writes lifecycle hooks for a supported tool (claude, grok). It refuses --token; use --token-file or STATUSPAN_TOKEN. hook claude and hook grok print nothing on stdout and exit 0. An unknown hook tool exits 0. An unknown hooks tool exits 2.
 
 `, version)
 }

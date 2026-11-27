@@ -183,7 +183,7 @@ Current state is one card per `(agent, job_id)`. Every post is appended first. T
 
 `statuspan` with no arguments, or with a leading dash, is `serve`. `version`, `-version`, and `--version` must be the first argument. Untagged builds print `statuspan 0.2.0`. Release builds replace that with ldflags.
 
-Exit code is 1 on error. The message is prefixed `statuspan: `. `statuspan run` is the exception: it exits with the wrapped command's status. A command that cannot be started is 127. Missing `--agent`, `--job`, or the command is 2. Unknown flags and invalid `--ttl` or `--heartbeat` on `run` are also 2, and the command does not start. A reporting misconfiguration does not change `run`'s exit code. `statuspan hook claude` always exits 0 and prints nothing on stdout, including when the payload is invalid or the board is down.
+Exit code is 1 on error. The message is prefixed `statuspan: `. `statuspan run` is the exception: it exits with the wrapped command's status. A command that cannot be started is 127. Missing `--agent`, `--job`, or the command is 2. Unknown flags and invalid `--ttl` or `--heartbeat` on `run` are also 2, and the command does not start. A reporting misconfiguration does not change `run`'s exit code. `statuspan hook claude` and `statuspan hook grok` always exit 0 and print nothing on stdout, including when the payload is invalid or the board is down. `statuspan hook <unknown>` exits 0 and prints nothing. `statuspan hooks` with an unknown tool exits 2 and names the supported tools (`claude`, `grok`).
 
 ### statuspan serve
 
@@ -265,9 +265,20 @@ If the command cannot be started, both modes post `failed` with a note like `Cou
 
 Relay flags and `STATUSPAN_URL` / `--url` / `STATUSPAN_TOKEN_FILE` match `post`, with one difference: `post` returns the configuration error, and `run` warns and still runs the command.
 
-### Claude Code hooks
+### Agent hooks
 
-`statuspan hook claude` reads one Claude Code hook payload from stdin and posts one job update. It always exits 0 and prints nothing on stdout. Warnings go to stderr only with `--verbose`. `statuspan hooks install claude` merges command hooks into `~/.claude/settings.json`. `--project` writes `./.claude/settings.json`, `--settings PATH` picks a file, `--home PATH` overrides the home directory, and `--dry-run` prints the JSON and writes nothing. `statuspan hooks uninstall claude` removes only those handlers. `statuspan hooks print claude` prints the handlers and writes nothing. A prompt sets the title, tool calls update the note, permission prompts set `blocked`, the end of a turn sets `done`, and session end sets `done`. Stop runs every turn, so an idle interactive session shows done until the next prompt. Titles and notes are redacted best-effort. The hook never blocks Claude and never prints into the session. Do not pass `--token` to `hooks install`; use `--token-file` or `STATUSPAN_TOKEN`.
+`statuspan hook <tool>` reads one hook payload from stdin and posts one job update. `claude` and `grok` always exit 0 and print nothing on stdout. Warnings go to stderr only with `--verbose`. An unknown tool exits 0 and prints nothing, so a mis-installed hook cannot break the agent.
+
+| Tool | Install | File |
+| --- | --- | --- |
+| Claude Code | `statuspan hooks install claude` | `~/.claude/settings.json` |
+| Grok | `statuspan hooks install grok` | `~/.grok/hooks/statuspan.json` |
+
+`statuspan hooks install claude` merges command hooks into `~/.claude/settings.json`. `--project` writes `./.claude/settings.json`, `--settings PATH` picks a file, `--home PATH` overrides the home directory, and `--dry-run` prints the JSON and writes nothing. `statuspan hooks uninstall claude` removes only those handlers. `statuspan hooks print claude` prints the handlers and writes nothing. `statuspan hooks install grok` writes `~/.grok/hooks/statuspan.json` (or `./.grok/hooks/statuspan.json` with `--project`). It refuses to overwrite a file that does not already contain a StatusPan `hook grok` command. `statuspan hooks uninstall grok` removes only that file. An unknown `hooks` tool exits 2 and lists `claude` and `grok`.
+
+A prompt sets the title, tool calls update the note, permission prompts set `blocked`, the end of a turn sets `done`, and session end sets `done`. Stop runs every turn, so an idle interactive session shows done until the next prompt. Titles and notes are redacted best-effort. The hook never blocks the agent and never prints into the session. Do not pass `--token` to `hooks install`; use `--token-file` or `STATUSPAN_TOKEN`.
+
+Grok project hooks need folder trust (`/hooks-trust` or `--trust`) before they run. Grok also reads `~/.claude/settings.json` and `~/.cursor/hooks.json`. When `GROK_HOOK_EVENT` is set, StatusPan treats the event as Grok (agent `Grok`, `grok-` job id), so both installs post the same update twice. That second post is harmless. A Grok Stop whose reason is `shutdown` is ignored. `StopCancelled` is `done` with note `Turn stopped (<reason>)`.
 
 ### statuspan agent
 

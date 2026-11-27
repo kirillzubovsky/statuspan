@@ -30,6 +30,9 @@ func TestMain(m *testing.M) {
 	os.Unsetenv("STATUSPAN_AGENT")
 	os.Unsetenv("STATUSPAN_ABANDON_AFTER")
 	os.Unsetenv("STATUSPAN_ABANDON_WAITING_AFTER")
+	os.Unsetenv("GROK_HOOK_EVENT")
+	os.Unsetenv("GROK_SESSION_ID")
+	os.Unsetenv("GROK_WORKSPACE_ROOT")
 	os.Exit(m.Run())
 }
 
