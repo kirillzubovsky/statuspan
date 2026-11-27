@@ -314,7 +314,7 @@ func TestUnknownHookTool(t *testing.T) {
 	for _, args := range [][]string{
 		{"hooks", "install", "opencode"},
 		{"hooks", "uninstall", "gemini"},
-		{"hooks", "print", "cursor"},
+		{"hooks", "print", "aider"},
 		{"hooks", "install"},
 	} {
 		_, _, err := runCLI(t, args...)
@@ -322,7 +322,7 @@ func TestUnknownHookTool(t *testing.T) {
 		if !errors.As(err, &ee) || ee.code != 2 {
 			t.Fatalf("%v err %v", args, err)
 		}
-		if !strings.Contains(err.Error(), "claude") || !strings.Contains(err.Error(), "grok") || !strings.Contains(err.Error(), "codex") {
+		if !strings.Contains(err.Error(), "claude") || !strings.Contains(err.Error(), "grok") || !strings.Contains(err.Error(), "codex") || !strings.Contains(err.Error(), "cursor") {
 			t.Fatalf("%v err %v", args, err)
 		}
 	}

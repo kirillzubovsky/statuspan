@@ -46,21 +46,34 @@ var grokFailMarkerDir = filepath.Join(os.TempDir(), "statuspan-grok")
 // Claude does, and UserPromptSubmit and Stop clear it.
 var codexFailMarkerDir = filepath.Join(os.TempDir(), "statuspan-codex")
 
+// cursorFailMarkerDir is the same marker for Cursor sessions. Tests replace it.
+// A stop whose status is error writes it. beforeSubmitPrompt and a completed
+// or aborted stop clear it. sessionEnd still reports failed when it is present.
+var cursorFailMarkerDir = filepath.Join(os.TempDir(), "statuspan-cursor")
+
 const (
 	// Codex Stop and SubagentStop reject plain text on stdout. Other events
 	// would add that text as developer context. One empty JSON object covers
 	// every path, including ignored events and errors.
 	codexHookStdout = "{}\n"
+	// cursorContinueStdout is the only beforeSubmitPrompt reply. Missing
+	// "continue" can block the prompt, including when stdin is empty or the
+	// payload does not parse. Other Cursor events print cursorEmptyStdout so
+	// stop cannot set followup_message.
+	cursorContinueStdout = "{\"continue\":true}\n"
+	cursorEmptyStdout    = "{}\n"
 	// claudeRestartHint is printed whenever Claude settings are written,
 	// including uninstall, so an open session reloads the file.
 	claudeRestartHint = "Restart Claude Code sessions to pick up the hooks."
 	codexTrustHint    = "Open /hooks in Codex and trust the StatusPan hooks. Trust is per hook hash, so re-installing with different flags needs trusting again."
 	codexProjectHint  = "Project hooks load only in trusted projects."
+	cursorReloadHint  = "Cursor reloads hooks.json automatically."
 )
 
 // hookAdapter is one coding tool that can report through `statuspan hook`.
 // Stdout is per tool. Claude and Grok print nothing, because those CLIs feed
-// hook stdout back into the session. Codex prints codexHookStdout.
+// hook stdout back into the session. Codex prints codexHookStdout. Cursor's
+// reply depends on the event; see hookStdout.
 type hookAdapter struct {
 	name               string
 	displayAgent       string
@@ -70,7 +83,11 @@ type hookAdapter struct {
 	mapStopCancelled   bool
 	// codex selects Codex event mapping (apply_patch, PermissionRequest,
 	// Interrupt). Claude and Grok leave it false.
-	codex  bool
+	codex bool
+	// cursor selects Cursor's camelCase events and flat hooks.json. Permission
+	// hooks are never registered: invalid JSON blocks them, and "allow" can
+	// pre-approve a tool.
+	cursor bool
 	specs  []hookEventSpec
 	stdout string
 	locate func(project bool, settings, home, dir string) (string, error)
@@ -96,7 +113,7 @@ type hookOpts struct {
 }
 
 func hookRegistry() []hookAdapter {
-	return []hookAdapter{claudeAdapter(), grokAdapter(), codexAdapter()}
+	return []hookAdapter{claudeAdapter(), grokAdapter(), codexAdapter(), cursorAdapter()}
 }
 
 func claudeAdapter() hookAdapter {
@@ -137,6 +154,19 @@ func codexAdapter() hookAdapter {
 		locate:       codexHooksPath,
 		installHint:  codexTrustHint,
 		projectHint:  codexProjectHint,
+	}
+}
+
+func cursorAdapter() hookAdapter {
+	return hookAdapter{
+		name:         "cursor",
+		displayAgent: "Cursor",
+		jobPrefix:    "cursor",
+		markerDir:    func() string { return cursorFailMarkerDir },
+		cursor:       true,
+		specs:        cursorHookSpecs(),
+		locate:       cursorHooksPath,
+		installHint:  cursorReloadHint,
 	}
 }
 
@@ -231,20 +261,30 @@ func runHookAdapter(adapter hookAdapter, invoked string, args []string) error {
 		}
 		fmt.Fprintf(os.Stderr, "statuspan: %s\n", msg)
 	}
-	if err := postHook(adapter, seen, strings.TrimSpace(*agent), *jobURL, *addr, *relayURL, *workspace, *token, *tokenFile); err != nil {
+	started := time.Now()
+	body, readErr := readHookStdin(hookOverallTimeout)
+	if err := postHook(adapter, started, body, readErr, seen, strings.TrimSpace(*agent), *jobURL, *addr, *relayURL, *workspace, *token, *tokenFile); err != nil {
 		warn(err)
 	}
-	if adapter.stdout != "" {
-		fmt.Fprint(os.Stdout, adapter.stdout)
+	if out := adapter.hookStdout(body); out != "" {
+		fmt.Fprint(os.Stdout, out)
 	}
 	return nil
 }
 
-func postHook(adapter hookAdapter, seen map[string]bool, agent, jobURL, addr, relayURL, workspace, token, tokenFile string) error {
-	started := time.Now()
-	body, err := readHookStdin(hookOverallTimeout)
-	if err != nil {
-		return err
+// hookStdout is what the tool's CLI reads after the hook exits. Cursor picks
+// the bytes from the payload. Grok's override replaces the adapter first, so
+// a Cursor file executed by Grok still prints nothing.
+func (a hookAdapter) hookStdout(body []byte) string {
+	if a.cursor {
+		return cursorStdout(body)
+	}
+	return a.stdout
+}
+
+func postHook(adapter hookAdapter, started time.Time, body []byte, readErr error, seen map[string]bool, agent, jobURL, addr, relayURL, workspace, token, tokenFile string) error {
+	if readErr != nil {
+		return readErr
 	}
 	if len(bytes.TrimSpace(body)) == 0 {
 		return nil
@@ -360,6 +400,12 @@ type claudeHookInput struct {
 	ErrorDetailsAlt         json.RawMessage `json:"errorDetails"`
 	Source                  flexString      `json:"source"`
 	Reason                  flexString      `json:"reason"`
+	ConversationID          flexString      `json:"conversation_id"`
+	ComposerMode            flexString      `json:"composer_mode"`
+	Status                  flexString      `json:"status"`
+	FilePath                flexString      `json:"file_path"`
+	ErrorMessage            flexString      `json:"error_message"`
+	WorkspaceRoots          json.RawMessage `json:"workspace_roots"`
 }
 
 func parseClaudeHook(body []byte) (claudeHookInput, error) {
@@ -448,7 +494,16 @@ func codexUpdate(in claudeHookInput, agent string) (store.Update, bool) {
 }
 
 func (a hookAdapter) update(in claudeHookInput, agent string) (store.Update, bool) {
-	return mapSessionHook(normalizeHookInput(in), agent, a.hookOpts())
+	in = normalizeHookInput(in)
+	if a.cursor {
+		return mapCursorHook(in, agent, a.hookOpts())
+	}
+	return mapSessionHook(in, agent, a.hookOpts())
+}
+
+// cursorUpdate maps one Cursor hook payload.
+func cursorUpdate(in claudeHookInput, agent string) (store.Update, bool) {
+	return cursorAdapter().update(in, agent)
 }
 
 // mapSessionHook maps one Claude-shaped hook payload. ok is false when the
@@ -1387,6 +1442,9 @@ func hooksAction(action string, args []string) error {
 	command := hookCommand(bin, adapter.name, bakedHookFlags(seen, *jobURL, *addr, *relayURL, *workspace, *tokenFile))
 	if adapter.file {
 		return grokHooksAction(action, adapter.specs, command, bin, *project, *settings, *home, *dir, *dry)
+	}
+	if adapter.cursor {
+		return cursorHooksAction(action, adapter, command, bin, *project, *settings, *home, *dir, *dry)
 	}
 	return claudeHooksAction(action, adapter, command, bin, *project, *settings, *home, *dir, *dry)
 }

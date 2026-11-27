@@ -118,7 +118,7 @@ statuspan run --agent "My Agent" --job build-1 --title "Build v1" -- make test
 statuspan run --recurring --agent "My Agent" --job digest --title "Daily digest" -- python digest.py
 ```
 
-If you are Claude Code, Grok, or Codex and `statuspan hooks install <tool>` has been run (`claude`, `grok`, or `codex`), your session is reported automatically; still post meaningful titles and progress yourself when useful. The hook only posts status. It does not print into the session and it does not block. Codex runs the hooks only after they are trusted in `/hooks`.
+If you are Claude Code, Grok, Codex, or Cursor and `statuspan hooks install <tool>` has been run (`claude`, `grok`, `codex`, or `cursor`), your session is reported automatically; still post meaningful titles and progress yourself when useful. The hook only posts status. It does not block the session. Claude and Grok print nothing into the session. Codex prints `{}`. Cursor prints `{"continue":true}` for beforeSubmitPrompt and `{}` for every other event. Codex runs the hooks only after they are trusted in `/hooks`. The Cursor IDE agent and the Cursor CLI both read `hooks.json`, and Cursor reloads that file automatically.
 
 The default agent is `STATUSPAN_AGENT`. The title defaults to the job id. `--ttl` is the heartbeat window in seconds (default 600). The heartbeat interval defaults to `min(ttl/2, 60s)` and is at least 10 seconds. `--heartbeat SEC` replaces that interval with no floor (tests use `1`). `--link` is optional.
 
