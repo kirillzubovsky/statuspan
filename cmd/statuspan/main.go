@@ -201,6 +201,7 @@ func serveCmd(args []string) error {
 	}
 
 	handler := server.New(st)
+	handler.SetSmartTitleCache(filepath.Join(*data, "smart-title-cache"))
 	if syncer != nil {
 		handler.SetRelay(syncer.Status)
 	}

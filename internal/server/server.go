@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/kirillzubovsky/statuspan/internal/relay"
@@ -28,6 +29,11 @@ type Server struct {
 	ping time.Duration
 	// relay reports sync status for /healthz. Nil means local-only.
 	relay func() relay.Status
+	// smartCache is the smart-title download cache. Empty disables the proxy.
+	smartCache  string
+	smartClient *http.Client
+	smartMu     sync.Mutex
+	smartKeys   map[string]*sync.Mutex
 }
 
 // New returns a server for st.
@@ -38,6 +44,12 @@ func New(st *store.Store) *Server {
 // SetRelay reports relay sync status on /healthz. Nil leaves relay unconfigured.
 func (s *Server) SetRelay(fn func() relay.Status) {
 	s.relay = fn
+}
+
+// SetSmartTitleCache enables the local smart-title proxy. dir is created on
+// first download. An empty dir leaves the proxy disabled (404).
+func (s *Server) SetSmartTitleCache(dir string) {
+	s.smartCache = dir
 }
 
 // Handler is the HTTP mux.
@@ -51,6 +63,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/jobs", s.handleClear)
 	mux.HandleFunc("GET /api/jobs/{agent}/{job_id}", s.handleGet)
 	mux.HandleFunc("DELETE /api/jobs/{agent}/{job_id}", s.handleDelete)
+	mux.HandleFunc("POST /api/jobs/{agent}/{job_id}/title", s.handleTitle)
+	mux.HandleFunc("GET /smart-title-worker.js", s.handleSmartWorker)
+	mux.HandleFunc("GET /api/smart-title/lib/{path...}", s.handleSmartLib)
+	mux.HandleFunc("GET /api/smart-title/model/{path...}", s.handleSmartModel)
 	mux.HandleFunc("GET /api/events", s.handleEvents)
 	mux.HandleFunc("GET /api/stream", s.handleStream)
 	return mux
@@ -165,6 +181,44 @@ func (s *Server) handleGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, job)
+}
+
+func (s *Server) handleTitle(w http.ResponseWriter, r *http.Request) {
+	defer r.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(r.Body, maxBody+1))
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "unreadable body")
+		return
+	}
+	if len(body) > maxBody {
+		writeErr(w, http.StatusBadRequest, "body too large")
+		return
+	}
+	body = bytes.TrimSpace(body)
+	if len(body) == 0 {
+		writeErr(w, http.StatusBadRequest, "invalid json")
+		return
+	}
+	var payload struct {
+		Title *string `json:"title"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid json")
+		return
+	}
+	if payload.Title == nil {
+		writeErr(w, http.StatusBadRequest, "title is required")
+		return
+	}
+	if _, err := s.store.SetTitleOverlay(r.PathValue("agent"), r.PathValue("job_id"), *payload.Title); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeErr(w, http.StatusNotFound, "not found")
+			return
+		}
+		writeStoreErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (s *Server) handleDelete(w http.ResponseWriter, r *http.Request) {
