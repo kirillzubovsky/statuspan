@@ -238,6 +238,7 @@ a.ext{color:var(--accent);font-size:14px;text-decoration:none}
   var smartWorker = null;
   var smartReady = false;
   var smartFailedNotice = false;
+  var smartWasmRestarted = false;
   var smartTried = new Set();
   var smartInflight = new Map();
   var smartSeq = 0;
@@ -1399,6 +1400,10 @@ a.ext{color:var(--accent);font-size:14px;text-decoration:none}
       scheduleSmart();
       return;
     }
+    if (msg.type === "fallback-wasm") {
+      restartSmartWasm(msg.message);
+      return;
+    }
     if (msg.type === "error") {
       failSmartLoad(msg.message);
       return;
@@ -1406,13 +1411,40 @@ a.ext{color:var(--accent);font-size:14px;text-decoration:none}
     if (msg.type === "result" || msg.type === "fail") finishSmart(msg);
   }
 
+  function restartSmartWasm(detail) {
+    if (smartWasmRestarted) {
+      failSmartLoad(detail);
+      return;
+    }
+    smartWasmRestarted = true;
+    if (detail) console.error(detail);
+    var prev = smartWorker;
+    smartWorker = null;
+    smartReady = false;
+    if (prev) {
+      prev.onmessage = null;
+      prev.onerror = null;
+      prev.terminate();
+    }
+    showSmartStatus("Loading title model…");
+    var worker = new Worker("/smart-title-worker.js", { type: "module" });
+    smartWorker = worker;
+    worker.onmessage = onSmartMessage;
+    worker.onerror = function (e) {
+      if (smartWorker !== worker) return;
+      failSmartLoad(e && e.message);
+    };
+    worker.postMessage({ type: "load", forceWasm: true });
+  }
+
   function startSmart(confirmFirst) {
     if (smartOn && smartWorker) return;
-    if (confirmFirst && !window.confirm("This downloads an open-source model (Qwen 2.5 0.5B, about 450 MB) once, caches it, and writes short titles on this machine only. Nothing is sent to a server.")) {
+    if (confirmFirst && !window.confirm("This downloads an open-source model (Qwen 2.5 0.5B, about 500 MB) once, caches it, and writes short titles on this machine only. Nothing is sent to a server.")) {
       syncSmartButton();
       return;
     }
     smartFailedNotice = false;
+    smartWasmRestarted = false;
     smartOn = true;
     smartReady = false;
     writeSmart(true);

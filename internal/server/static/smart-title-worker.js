@@ -16,6 +16,18 @@ var pending = [];
 var busy = false;
 var generator = null;
 var loading = null;
+var stopped = false;
+
+async function webGPUAdapter() {
+  try {
+    if (!self.navigator || !self.navigator.gpu || typeof self.navigator.gpu.requestAdapter !== "function") {
+      return null;
+    }
+    return await self.navigator.gpu.requestAdapter();
+  } catch (err) {
+    return null;
+  }
+}
 
 function opts(device, dtype) {
   return {
@@ -56,28 +68,26 @@ function textOf(out) {
   return "";
 }
 
-function load() {
+function load(forceWasm) {
+  if (stopped) return Promise.resolve(null);
   if (generator) return Promise.resolve(generator);
   if (loading) return loading;
   loading = (async function () {
-    var gpu = !!(self.navigator && self.navigator.gpu);
-    var device = gpu ? "webgpu" : "wasm";
-    var dtype = gpu ? "q4f16" : "uint8";
-    try {
-      generator = await pipeline("text-generation", MODEL, opts(device, dtype));
-    } catch (err) {
-      // navigator.gpu can be set when the adapter cannot run q4f16.
-      if (device === "webgpu") {
-        try {
-          generator = await pipeline("text-generation", MODEL, opts("wasm", "uint8"));
-        } catch (wasmErr) {
-          generator = await pipeline("text-generation", MODEL, opts("wasm", "q4"));
-        }
-      } else if (device === "wasm" && dtype === "uint8") {
-        generator = await pipeline("text-generation", MODEL, opts("wasm", "q4"));
-      } else {
-        throw err;
+    var adapter = null;
+    if (!forceWasm) adapter = await webGPUAdapter();
+    if (adapter) {
+      try {
+        generator = await pipeline("text-generation", MODEL, opts("webgpu", "q4f16"));
+      } catch (err) {
+        // A failed WebGPU init taints ONNX Runtime in this worker.
+        stopped = true;
+        generator = null;
+        loading = null;
+        postMessage({ type: "fallback-wasm", message: String(err && err.message || err) });
+        return null;
       }
+    } else {
+      generator = await pipeline("text-generation", MODEL, opts("wasm", "uint8"));
     }
     postMessage({ type: "ready" });
     return generator;
@@ -131,14 +141,15 @@ function pump() {
 }
 
 self.onmessage = function (ev) {
+  if (stopped) return;
   var msg = ev.data || {};
   if (msg.type === "load") {
-    load().catch(function () {});
+    load(!!msg.forceWasm).catch(function () {});
     return;
   }
   if (msg.type === "summarize") {
     pending.push(msg);
     if (generator) pump();
-    else load().then(function () { pump(); }).catch(function () {});
+    else load(false).then(function () { pump(); }).catch(function () {});
   }
 };

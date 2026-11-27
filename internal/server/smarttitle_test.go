@@ -320,4 +320,16 @@ func TestSmartWorkerSelfContained(t *testing.T) {
 	if !strings.Contains(js, "/api/smart-title/lib/transformers.web.js") || !strings.Contains(js, "/api/smart-title/model/") {
 		t.Fatal("worker does not use the local proxy")
 	}
+	if !strings.Contains(js, "requestAdapter") {
+		t.Fatal("worker does not probe requestAdapter")
+	}
+	if !strings.Contains(js, "fallback-wasm") {
+		t.Fatal("worker does not signal fallback-wasm")
+	}
+	if strings.Contains(js, `"q4"`) {
+		t.Fatal(`worker uses dtype "q4"`)
+	}
+	if !strings.Contains(js, "q4f16") {
+		t.Fatal("worker dropped webgpu q4f16")
+	}
 }
