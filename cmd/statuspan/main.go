@@ -86,6 +86,10 @@ func run(args []string) error {
 		return postCmd(args[1:])
 	case "run":
 		return runCmd(args[1:])
+	case "hook":
+		return hookCmd(args[1:])
+	case "hooks":
+		return hooksCmd(args[1:])
 	case "agent", "skill":
 		return agentCmd(args[1:])
 	case "ls":
@@ -121,6 +125,12 @@ Usage:
   statuspan run --agent NAME --job ID [--title T] [--ttl SEC] [--heartbeat SEC] [--link URL] [--recurring]
             [--url ENDPOINT | --addr host:port | --relay URL --workspace NAME (--token TOKEN | --token-file PATH)]
             [--verbose] -- COMMAND [ARGS...]
+  statuspan hook claude [--agent NAME]
+            [--url ENDPOINT | --addr host:port | --relay URL --workspace NAME (--token TOKEN | --token-file PATH)]
+            [--verbose]
+  statuspan hooks install|uninstall|print claude [--project] [--settings PATH] [--home PATH] [--dir PATH]
+            [--dry-run] [--bin PATH]
+            [--url ENDPOINT | --addr host:port | --relay URL --workspace NAME --token-file PATH]
   statuspan agent [print|prompt|json|install] [--target LIST] [--dir PATH] [--home PATH] [--dry-run]
   statuspan ls [--addr host:port]
   statuspan clear --yes [--section attention|progress|queued|done] [--addr host:port]
@@ -129,8 +139,9 @@ Usage:
 AI agents: run 'statuspan agent' for instructions or 'statuspan agent install' to install the skill.
 
 Relay sync is optional. With no relay flags, environment, or data-dir relay.json, the daemon stays local.
-post and run talk to the local daemon unless --relay / --workspace / --token (or STATUSPAN_RELAY_URL, STATUSPAN_RELAY_WORKSPACE, STATUSPAN_TOKEN, STATUSPAN_TOKEN_FILE) are set.
-STATUSPAN_URL, or --url, is the full local jobs endpoint. STATUSPAN_AGENT is the default for --agent on run.
+post, run, and hook talk to the local daemon unless --relay / --workspace / --token (or STATUSPAN_RELAY_URL, STATUSPAN_RELAY_WORKSPACE, STATUSPAN_TOKEN, STATUSPAN_TOKEN_FILE) are set.
+STATUSPAN_URL, or --url, is the full local jobs endpoint. STATUSPAN_AGENT is the default for --agent on run and hook.
+hooks install writes Claude Code lifecycle hooks. It refuses --token; use --token-file or STATUSPAN_TOKEN. hook claude prints nothing on stdout and exits 0.
 
 `, version)
 }

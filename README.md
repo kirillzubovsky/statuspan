@@ -116,6 +116,19 @@ It posts `running` at progress 0, heartbeats, then `done` at progress 100 when t
 
 The endpoint is the local daemon (`--addr` / `STATUSPAN_ADDR`, default `127.0.0.1:4477`) unless `--url` or `STATUSPAN_URL` sets the full jobs URL (for example `http://127.0.0.1:14477/api/jobs`). A relay uses the same flags and environment as `post`: `--relay` / `STATUSPAN_RELAY_URL`, `--workspace` / `STATUSPAN_RELAY_WORKSPACE`, and `--token` / `STATUSPAN_TOKEN` or `--token-file` / `STATUSPAN_TOKEN_FILE`. The write token is sent as `Authorization: Bearer` and is not printed. `post` accepts `--url` / `STATUSPAN_URL` and `STATUSPAN_TOKEN_FILE` the same way. On `post`, an incomplete relay, an unreadable token file, a bad `--url` or `--addr`, or `--url` combined with a relay is an error and does not post locally. On `run`, that same misconfiguration prints one warning and the command still runs, with no posts.
 
+## Claude Code hooks
+
+Claude Code can report to the board from lifecycle hooks, even when the model does not post. A prompt sets the title, a tool call updates the note, a permission prompt marks the job blocked, the end of a turn marks it done, and the end of the session marks it done.
+
+```bash
+statuspan hooks install claude
+statuspan hooks install claude --project
+statuspan hooks install claude --dry-run
+statuspan hooks uninstall claude
+```
+
+`statuspan hooks install claude` writes `~/.claude/settings.json`. `--project` writes `./.claude/settings.json` (`--dir` chooses the project root). `--settings PATH` chooses a file. `--home PATH` overrides the home directory. `--dry-run` prints the JSON and writes nothing. Secrets in titles and notes are redacted best-effort before the post. Stop runs at the end of every turn, so an idle interactive session shows done until the next prompt. The hooks only post status and print nothing back to Claude. SessionStart is synchronous with a 3 second timeout so its post lands before later events. The other hooks are asynchronous and do not block the session. Do not pass `--token` to `hooks install`. Use `--token-file` or `STATUSPAN_TOKEN`.
+
 ## statuspan agent
 
 The binary carries the instructions an agent needs.
