@@ -886,7 +886,7 @@ func TestClearSectionHTTP(t *testing.T) {
 
 func TestIndexSelfContained(t *testing.T) {
 	html := string(indexHTML)
-	for _, needle := range []string{"StatusPan", "EventSource", "/api/stream", "STALLED", "statuspan-theme", "/api/events", "#/agent/", "#/job/", "prefers-color-scheme", "Needs attention", "__statuspan", "Clear all", "Clear done", "data-clear-section", "Offline", "statuspan-expand-queued"} {
+	for _, needle := range []string{"StatusPan", "EventSource", "/api/stream", "STALLED", "statuspan-theme", "/api/events", "#/agent/", "#/job/", "prefers-color-scheme", "Needs attention", "__statuspan", "Clear all", "Clear done", "data-clear-section", "Offline", "statuspan-expand-queued", "Smart job titles", "statuspan-smart-titles", "wasm-unsafe-eval"} {
 		if !strings.Contains(html, needle) {
 			t.Fatalf("index missing %s", needle)
 		}

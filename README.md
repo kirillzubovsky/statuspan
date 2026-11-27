@@ -4,7 +4,7 @@ Local board for which AI agent is working on what. One Go binary, loopback only,
 
 A job update has `agent`, `job_id`, and `state` (`queued`, `running`, `blocked`, `done`, `failed`). Later updates may omit `state`. When `seq` is set, the highest seq wins. An older seq stays in history and does not change the job. Bots cannot post `abandoned`. That word is not a stored state.
 
-StatusPan is one-way. Bots push updates. StatusPan never pushes back: no owner nudges, no webhooks, and no board buttons that edit a job. Jobs are removed by Clear all, which asks first, or by a clear control on one section.
+StatusPan is one-way. Bots push updates. StatusPan never pushes back: no owner nudges, no webhooks, and no board buttons that edit a job's state. Jobs are removed by Clear all, which asks first, or by a clear control on one section. A local-board option can overlay a shorter display title. It does not change the job or nudge the agent.
 
 A running job with no heartbeat for `ttl` seconds (default 600) is stalled. Queued, blocked, done, and failed are not. Stalled and abandoned are derived when the board is read. They are not written into the JSONL log.
 
@@ -57,6 +57,8 @@ The release attaches `StatusPan.dmg` along with the CLI binaries.
 ```
 
 Open http://127.0.0.1:4477 (`/` or `#/`). The home page is an airport-style board: Needs attention (failed, blocked, stalled, and abandoned), then In progress. Queued and Done stay folded until you open them. Each visible section header has its own clear: Clear on Needs attention, In progress, and Queued, and Clear done on Done. Clear all stays in the top menu. Coming back to the window refreshes the board. If the connection is stale, the header shows an offline / last-updated warning instead of the live clock. Click a row to open that job (`/#/job/<agent>/<job_id>`). The bot name in the job details opens that bot's jobs and timeline (`/#/agent/<name>`). Press `T`, or the top-bar button, to toggle day and night.
+
+The ⋯ menu includes Smart job titles. It is off by default. Turning it on asks you to confirm a one-time download of an open-source model (Qwen 2.5 0.5B, about 450 MB). The daemon caches that model in the data directory. The board rewrites long titles on this machine only. It does not edit job state, nudge an agent, or send the title anywhere else. Turning it off stops new rewrites and leaves titles that were already shortened.
 
 `./statuspan post` posts to the relay when `STATUSPAN_RELAY_URL`, `STATUSPAN_RELAY_WORKSPACE`, and `STATUSPAN_TOKEN_FILE` are set, and to the local daemon otherwise.
 

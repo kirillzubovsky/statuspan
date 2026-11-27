@@ -207,6 +207,8 @@ Do not post `stalled` or `abandoned`. Those words are not states. The board deri
 
 Use a stable slug such as `build-1` or `docs-refresh`. One slug per piece of work, reused for every heartbeat. A new slug is a new card. No secrets in `agent`, `job_id`, `title`, `note`, or `link`.
 
+The local board can shorten a long title for display. That option is off unless someone turns it on in the board, and the rewrite stays on that machine. Keep posting titles as you do today. Do not call a separate title endpoint.
+
 ## Off this machine
 
 A cloud or remote agent (Cursor cloud agents, CI, another server) cannot reach `127.0.0.1` on your machine. It posts to a relay with a write token stored as a secret. Your local daemon pulls those jobs in. Hosted Relay needs no Cloudflare setup: <https://statuspan.com/cloud>. Full steps: <https://statuspan.com/relay> and <https://statuspan.com/llms-full.txt>.

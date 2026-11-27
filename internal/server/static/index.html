@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline' 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self'">
 <title>StatusPan</title>
 <script>
 (function () {
@@ -116,9 +116,14 @@ a.who:hover{color:var(--text);text-decoration:none}
 .menu{position:relative;flex:none}
 .btn.slim{height:26px;padding:0 8px;font-size:12px}
 .btn.more{width:28px;height:26px;padding:0;justify-content:center;font-size:16px;line-height:1}
-.menu-pop{position:absolute;right:0;top:calc(100% + 6px);min-width:148px;padding:4px;background:var(--surf);border:1px solid var(--border2);border-radius:8px;box-shadow:var(--shadow);z-index:20}
+.menu-pop{position:absolute;right:0;top:calc(100% + 6px);min-width:188px;padding:4px;background:var(--surf);border:1px solid var(--border2);border-radius:8px;box-shadow:var(--shadow);z-index:20}
 .menu-pop button{display:block;width:100%;text-align:left;background:transparent;border:0;border-radius:6px;font:inherit;font-size:13px;color:var(--text);padding:8px 10px;cursor:pointer}
 .menu-pop button:hover{background:var(--surf2)}
+.menu-pop button[role="menuitemcheckbox"]{position:relative;padding-left:28px}
+.menu-pop button[aria-checked="true"]{background:var(--accent-bg)}
+.menu-pop button[aria-checked="true"]::before{content:"✓";position:absolute;left:10px;top:8px;color:var(--accent);font-size:12px}
+.smart-status{display:flex;align-items:center;min-height:28px;padding:4px 20px;background:var(--accent-bg);color:var(--text);font-size:12px;border-bottom:1px solid var(--border);flex:none}
+.smart-status[hidden]{display:none}
 .sh .n{color:var(--text3);font-weight:500}
 .bsec.done .brow[role="button"]{opacity:.92}
 .bsec.abandoned .sh{color:var(--text3)}
@@ -194,11 +199,13 @@ a.ext{color:var(--accent);font-size:14px;text-decoration:none}
   <div class="menu">
     <button type="button" class="btn more" id="more" aria-label="More" aria-haspopup="menu" aria-expanded="false" aria-controls="more-menu">⋯</button>
     <div class="menu-pop" id="more-menu" role="menu" hidden>
+      <button type="button" role="menuitemcheckbox" id="smart-titles" aria-checked="false" aria-pressed="false">Smart job titles</button>
       <button type="button" role="menuitem" id="clear-all" data-clear-all="1">Clear all</button>
     </div>
   </div>
   <button type="button" class="btn slim" id="tt">Night</button>
 </header>
+<div id="smart-status" class="smart-status" role="status" hidden></div>
 <div id="app"></div>
 <noscript><p class="empty">StatusPan needs JavaScript to show the live board.</p></noscript>
 <script>
@@ -226,6 +233,15 @@ a.ext{color:var(--accent);font-size:14px;text-decoration:none}
   var dataSerial = 0;
   var awaitRefetch = false;
   var SEV = { failed: 0, blocked: 1, stalled: 2, abandoned: 3 };
+  var SMART_KEY = "statuspan-smart-titles";
+  var smartOn = false;
+  var smartWorker = null;
+  var smartReady = false;
+  var smartFailedNotice = false;
+  var smartTried = new Set();
+  var smartInflight = new Map();
+  var smartSeq = 0;
+  var smartBannerTimer = 0;
 
   function esc(s) {
     return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
@@ -647,14 +663,22 @@ a.ext{color:var(--accent);font-size:14px;text-decoration:none}
     return '<span class="b-via" title="' + esc(stamp.title) + '">' + esc(stamp.text) + "</span>";
   }
 
+  function shownTitle(job) {
+    return (job && (job.title || job.job_id)) || "";
+  }
+
+  function tipTitle(job) {
+    return (job && (job.raw_title || job.title || job.job_id)) || "";
+  }
+
   function renderBoardRow(job, sel) {
     var pct = pctOf(job);
     var on = !!(sel && sel.agent === job.agent && sel.jobId === job.job_id);
-    var title = job.title || job.job_id;
+    var title = shownTitle(job);
     var mark = isAbandoned(job) ? " is-abandoned" : (isStalled(job) ? " is-stalled" : "");
     return '<div class="brow' + (on ? " sel" : "") + mark + '" role="button" tabindex="0" data-board-row="1" data-agent="' + esc(job.agent) + '" data-job-id="' + esc(job.job_id) + '" aria-pressed="' + (on ? "true" : "false") + '">' +
       '<span class="b-bot"><span class="who">' + avatar(job.agent, 18) + "<span>" + esc(job.agent) + "</span></span></span>" +
-      '<span class="b-title-col"><span class="b-title" title="' + esc(title) + '">' + esc(title) + "</span>" + provenanceHTML(job) + "</span>" +
+      '<span class="b-title-col"><span class="b-title" title="' + esc(tipTitle(job)) + '">' + esc(title) + "</span>" + provenanceHTML(job) + "</span>" +
       '<span class="b-status">' + statusHTML(job) + "</span>" +
       '<span class="b-prog prog"><span class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="' + pct + '" aria-label="Progress"><i style="width:' + pct + "%;background:" + barColor(job) + '"></i></span><span class="pct">' + pct + "%</span></span>" +
       '<span class="b-upd" data-ago="' + esc(job.updated_at || "") + '">' + esc(ago(job.updated_at)) + "</span></div>";
@@ -764,7 +788,7 @@ a.ext{color:var(--accent);font-size:14px;text-decoration:none}
     var seq = job.seq == null ? "—" : esc(String(job.seq));
     var finished = job.finished_at ? esc(fmtAbs(job.finished_at)) : "—";
     return '<div class="detail"><div class="kicker">' + pill(job.state) + stalledTag(job) + abandonedTag(job) + "</div>" +
-      "<h2>" + esc(job.title || job.job_id) + "</h2>" + provenanceHTML(job) +
+      "<h2 title=\"" + esc(tipTitle(job)) + "\">" + esc(shownTitle(job)) + "</h2>" + provenanceHTML(job) +
       '<div class="kv">' +
       "<span>Bot</span><span><a href=\"" + agentHref(job.agent) + "\">" + esc(job.agent) + "</a></span>" +
       "<span>Job</span><span class=\"mono\">" + esc(job.job_id) + "</span>" +
@@ -792,7 +816,7 @@ a.ext{color:var(--accent);font-size:14px;text-decoration:none}
       icon(knownState(job.state), pct, 14) +
       '<span class="sr">' + esc(LABELS[job.state] || job.state) + "</span>" +
       '<span class="id mono">' + esc(job.job_id) + "</span>" +
-      '<span class="t"><span class="t-main"><b>' + esc(job.title || job.job_id) + "</b>" + provenanceHTML(job) + "</span>" + stalledTag(job) + abandonedTag(job) + note + "</span>" +
+      '<span class="t"><span class="t-main"><b title="' + esc(tipTitle(job)) + '">' + esc(shownTitle(job)) + "</b>" + provenanceHTML(job) + "</span>" + stalledTag(job) + abandonedTag(job) + note + "</span>" +
       '<span class="prog"><span class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="' + pct + '"><i style="width:' + pct + "%;background:" + barColor(job) + '"></i></span>' + pct + "%</span>" +
       '<span class="el">' + elapsedHTML(job) + "</span>" +
       '<span class="up" data-ago="' + esc(job.updated_at || "") + '">' + esc(ago(job.updated_at)) + "</span>" +
@@ -933,6 +957,7 @@ a.ext{color:var(--accent);font-size:14px;text-decoration:none}
     restoreFocus(focus);
     syncAgentFetch();
     lastStall = stallKey();
+    scheduleSmart();
   }
 
   function syncAgentFetch() {
@@ -1247,6 +1272,202 @@ a.ext{color:var(--accent);font-size:14px;text-decoration:none}
     applyTheme(document.documentElement.classList.contains("dark") ? "day" : "night", true);
   });
 
+  function readSmart() {
+    try { return localStorage.getItem(SMART_KEY) === "1"; } catch (e) { return false; }
+  }
+
+  function writeSmart(on) {
+    try { localStorage.setItem(SMART_KEY, on ? "1" : "0"); } catch (e) {}
+  }
+
+  function syncSmartButton() {
+    var btn = document.getElementById("smart-titles");
+    if (!btn) return;
+    btn.setAttribute("aria-checked", smartOn ? "true" : "false");
+    btn.setAttribute("aria-pressed", smartOn ? "true" : "false");
+  }
+
+  function showSmartStatus(text) {
+    var el = document.getElementById("smart-status");
+    if (!el) return;
+    el.hidden = false;
+    el.textContent = text;
+  }
+
+  function hideSmartStatus() {
+    var el = document.getElementById("smart-status");
+    if (!el) return;
+    el.hidden = true;
+    el.textContent = "";
+  }
+
+  function needsSmartTitle(title) {
+    var original = String(title || "");
+    var flat = original.replace(/\s+/g, " ").trim();
+    if (!flat) return false;
+    if (/[\r\n]/.test(original)) return true;
+    if (flat.length > 180) return true;
+    if (/\.\.\.$/.test(flat) || /…$/.test(flat)) return true;
+    var words = flat.split(" ").filter(Boolean);
+    if (words.length > 10) return true;
+    var chunks = flat.split(/[.!?]+/);
+    var rich = 0;
+    for (var i = 0; i < chunks.length; i++) {
+      if (chunks[i].trim().split(/\s+/).filter(Boolean).length >= 2) rich++;
+    }
+    return rich >= 2;
+  }
+
+  function cleanSmartTitle(raw) {
+    var line = String(raw || "").split(/\r?\n/)[0];
+    line = line.replace(/^\s*title\s*:\s*/i, "");
+    line = line.replace(/^["'“”‘’«»]+|["'“”‘’«»]+$/g, "");
+    line = line.replace(/\s+/g, " ").trim().replace(/\.+$/, "");
+    var words = line.split(" ").filter(Boolean);
+    if (words.length > 10) words = words.slice(0, 10);
+    line = words.join(" ").replace(/\.+$/, "").trim();
+    words = line.split(" ").filter(Boolean);
+    if (words.length < 3) return "";
+    return words.join(" ");
+  }
+
+  function smartAttemptKey(agent, jobId, raw) {
+    return agent + "\0" + jobId + "\0" + raw;
+  }
+
+  function smartSource(job) {
+    if (!job || job.raw_title) return "";
+    return job.title || "";
+  }
+
+  function stopSmart() {
+    smartOn = false;
+    smartReady = false;
+    writeSmart(false);
+    if (smartBannerTimer) {
+      clearTimeout(smartBannerTimer);
+      smartBannerTimer = 0;
+    }
+    hideSmartStatus();
+    smartInflight = new Map();
+    var worker = smartWorker;
+    smartWorker = null;
+    if (worker) {
+      worker.onmessage = null;
+      worker.onerror = null;
+      worker.terminate();
+    }
+    syncSmartButton();
+  }
+
+  function failSmartLoad(detail) {
+    if (smartFailedNotice) return;
+    smartFailedNotice = true;
+    if (detail) console.error(detail);
+    stopSmart();
+    window.alert("Couldn't load the title model. Smart job titles are off.");
+  }
+
+  function onSmartMessage(ev) {
+    if (!smartOn) return;
+    var msg = ev.data || {};
+    if (msg.type === "progress") {
+      var status = String(msg.status || "");
+      var pct = null;
+      if (typeof msg.progress === "number" && isFinite(msg.progress)) {
+        pct = Math.round(Math.max(0, Math.min(100, msg.progress)));
+      }
+      if ((status === "progress" || status === "download") && pct != null) {
+        showSmartStatus("Downloading title model… " + pct + "%");
+        return;
+      }
+      if (status === "initiate" || status === "download" || status === "progress") {
+        showSmartStatus("Downloading title model…");
+        return;
+      }
+      showSmartStatus("Loading title model…");
+      return;
+    }
+    if (msg.type === "ready") {
+      smartReady = true;
+      syncSmartButton();
+      showSmartStatus("Smart titles are on");
+      if (smartBannerTimer) clearTimeout(smartBannerTimer);
+      smartBannerTimer = setTimeout(function () {
+        if (smartOn && smartReady) hideSmartStatus();
+      }, 4000);
+      scheduleSmart();
+      return;
+    }
+    if (msg.type === "error") {
+      failSmartLoad(msg.message);
+      return;
+    }
+    if (msg.type === "result" || msg.type === "fail") finishSmart(msg);
+  }
+
+  function startSmart(confirmFirst) {
+    if (smartOn && smartWorker) return;
+    if (confirmFirst && !window.confirm("This downloads an open-source model (Qwen 2.5 0.5B, about 450 MB) once, caches it, and writes short titles on this machine only. Nothing is sent to a server.")) {
+      syncSmartButton();
+      return;
+    }
+    smartFailedNotice = false;
+    smartOn = true;
+    smartReady = false;
+    writeSmart(true);
+    syncSmartButton();
+    showSmartStatus("Loading title model…");
+    var worker = new Worker("/smart-title-worker.js", { type: "module" });
+    smartWorker = worker;
+    worker.onmessage = onSmartMessage;
+    worker.onerror = function (e) {
+      if (smartWorker !== worker) return;
+      failSmartLoad(e && e.message);
+    };
+    worker.postMessage({ type: "load" });
+  }
+
+  function finishSmart(msg) {
+    smartInflight.delete(msg.id);
+    var job = findJob(msg.agent, msg.jobId);
+    if (!job || smartSource(job) !== msg.raw) return;
+    smartTried.add(smartAttemptKey(msg.agent, msg.jobId, msg.raw));
+    if (msg.type !== "result") return;
+    var cleaned = cleanSmartTitle(msg.text);
+    if (!cleaned) return;
+    job = findJob(msg.agent, msg.jobId);
+    if (!job || smartSource(job) !== msg.raw) return;
+    postSmartTitle(msg.agent, msg.jobId, cleaned);
+  }
+
+  function postSmartTitle(agent, jobId, title) {
+    fetch("/api/jobs/" + encodeURIComponent(agent) + "/" + encodeURIComponent(jobId) + "/title", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: title })
+    }).catch(function () {});
+  }
+
+  function scheduleSmart() {
+    if (!smartOn || !smartReady || !smartWorker) return;
+    for (var i = 0; i < jobs.length; i++) {
+      var job = jobs[i];
+      var raw = smartSource(job);
+      if (!raw || !needsSmartTitle(raw)) continue;
+      var key = smartAttemptKey(job.agent, job.job_id, raw);
+      if (smartTried.has(key)) continue;
+      var queued = false;
+      smartInflight.forEach(function (inf) {
+        if (inf.agent === job.agent && inf.jobId === job.job_id && inf.raw === raw) queued = true;
+      });
+      if (queued) continue;
+      var id = ++smartSeq;
+      smartInflight.set(id, { agent: job.agent, jobId: job.job_id, raw: raw });
+      smartWorker.postMessage({ type: "summarize", id: id, agent: job.agent, jobId: job.job_id, title: raw });
+    }
+  }
+
   document.getElementById("more").addEventListener("click", function (e) {
     e.stopPropagation();
     var menu = document.getElementById("more-menu");
@@ -1258,6 +1479,11 @@ a.ext{color:var(--accent);font-size:14px;text-decoration:none}
   document.getElementById("clear-all").addEventListener("click", function () {
     closeMenu();
     clearAll();
+  });
+  document.getElementById("smart-titles").addEventListener("click", function () {
+    closeMenu();
+    if (smartOn) stopSmart();
+    else startSmart(true);
   });
   document.addEventListener("click", function (e) {
     if (e.target.closest("#more") || e.target.closest("#more-menu")) return;
@@ -1282,6 +1508,7 @@ a.ext{color:var(--accent);font-size:14px;text-decoration:none}
     refetch: function () { return refetchJobs(); }
   };
 
+  if (readSmart()) startSmart(false);
   connectStream();
   render();
   setInterval(function () { refetchJobs(); }, 30000);

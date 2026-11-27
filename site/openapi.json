@@ -204,6 +204,51 @@
         }
       }
     },
+    "/api/jobs/{agent}/{job_id}/title": {
+      "post": {
+        "tags": ["daemon"],
+        "operationId": "daemonSetTitleOverlay",
+        "summary": "Set a local display title",
+        "description": "Local board only. Shows this title in place of the agent title without changing state, seq, progress, note, link, started_at, updated_at, or the event log. Not part of the relay. Agents keep posting titles with POST /api/jobs.",
+        "servers": [{"url": "http://127.0.0.1:4477"}],
+        "parameters": [
+          {"$ref": "#/components/parameters/agent"},
+          {"$ref": "#/components/parameters/jobId"}
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["title"],
+                "properties": {
+                  "title": {"type": "string", "description": "Short display title. The agent-posted title is left unchanged."}
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Overlay stored in memory for this process.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["ok"],
+                  "properties": {
+                    "ok": {"type": "boolean", "const": true}
+                  }
+                }
+              }
+            }
+          },
+          "400": {"$ref": "#/components/responses/Error"},
+          "404": {"$ref": "#/components/responses/Error"}
+        }
+      }
+    },
     "/api/events": {
       "get": {
         "tags": ["daemon"],
@@ -642,6 +687,7 @@
           "agent": {"type": "string"},
           "job_id": {"type": "string"},
           "title": {"type": "string"},
+          "raw_title": {"type": "string", "description": "Last agent-posted title when title is a local display overlay. Omitted otherwise. Local daemon only."},
           "state": {"type": "string", "enum": ["queued", "running", "blocked", "done", "failed"]},
           "progress": {"type": "integer", "minimum": 0, "maximum": 100},
           "link": {"type": "string"},
