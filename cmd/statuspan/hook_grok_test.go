@@ -307,12 +307,12 @@ func TestUnknownHookTool(t *testing.T) {
 	clearProxy(t)
 	ts, rec := newPostServer(t)
 	payload := `{"session_id":"abcdef1234567890","cwd":"/work/My Project","hook_event_name":"Stop"}`
-	stdout, stderr, err := runHook(t, payload, "hook", "codex", "--url", ts.URL+"/api/jobs")
+	stdout, stderr, err := runHook(t, payload, "hook", "opencode", "--url", ts.URL+"/api/jobs")
 	if err != nil || stdout != "" || stderr != "" || len(rec.snapshot()) != 0 {
 		t.Fatalf("err %v stdout %q stderr %q hits %d", err, stdout, stderr, len(rec.snapshot()))
 	}
 	for _, args := range [][]string{
-		{"hooks", "install", "codex"},
+		{"hooks", "install", "opencode"},
 		{"hooks", "uninstall", "gemini"},
 		{"hooks", "print", "cursor"},
 		{"hooks", "install"},
@@ -322,7 +322,7 @@ func TestUnknownHookTool(t *testing.T) {
 		if !errors.As(err, &ee) || ee.code != 2 {
 			t.Fatalf("%v err %v", args, err)
 		}
-		if !strings.Contains(err.Error(), "claude") || !strings.Contains(err.Error(), "grok") {
+		if !strings.Contains(err.Error(), "claude") || !strings.Contains(err.Error(), "grok") || !strings.Contains(err.Error(), "codex") {
 			t.Fatalf("%v err %v", args, err)
 		}
 	}

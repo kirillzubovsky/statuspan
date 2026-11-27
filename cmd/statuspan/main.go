@@ -141,7 +141,7 @@ AI agents: run 'statuspan agent' for instructions or 'statuspan agent install' t
 Relay sync is optional. With no relay flags, environment, or data-dir relay.json, the daemon stays local.
 post, run, and hook talk to the local daemon unless --relay / --workspace / --token (or STATUSPAN_RELAY_URL, STATUSPAN_RELAY_WORKSPACE, STATUSPAN_TOKEN, STATUSPAN_TOKEN_FILE) are set.
 STATUSPAN_URL, or --url, is the full local jobs endpoint. STATUSPAN_AGENT is the default for --agent on run and hook.
-hooks install writes lifecycle hooks for a supported tool (claude, grok). It refuses --token; use --token-file or STATUSPAN_TOKEN. hook claude and hook grok print nothing on stdout and exit 0. An unknown hook tool exits 0. An unknown hooks tool exits 2.
+hooks install writes lifecycle hooks for a supported tool (claude, grok, codex). It refuses --token; use --token-file or STATUSPAN_TOKEN. hook claude and hook grok print nothing on stdout and exit 0. hook codex prints {} followed by a newline and exits 0. An unknown hook tool exits 0. An unknown hooks tool exits 2.
 
 `, version)
 }

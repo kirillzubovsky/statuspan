@@ -118,26 +118,32 @@ The endpoint is the local daemon (`--addr` / `STATUSPAN_ADDR`, default `127.0.0.
 
 ## Agent hooks
 
-Claude Code and Grok can report to the board from lifecycle hooks, even when the model does not post. A prompt sets the title, a tool call updates the note, a permission prompt marks the job blocked, the end of a turn marks it done, and the end of the session marks it done.
+Claude Code, Grok, and Codex can report to the board from lifecycle hooks, even when the model does not post. A prompt sets the title, a tool call updates the note, a permission prompt marks the job blocked, the end of a turn marks it done, and the end of the session marks it done.
 
 | Tool | Install | File |
 | --- | --- | --- |
 | Claude Code | `statuspan hooks install claude` | `~/.claude/settings.json` |
 | Grok | `statuspan hooks install grok` | `~/.grok/hooks/statuspan.json` |
+| Codex | `statuspan hooks install codex` | `~/.codex/hooks.json` |
 
 ```bash
 statuspan hooks install claude
 statuspan hooks install grok
+statuspan hooks install codex
 statuspan hooks install claude --project
 statuspan hooks install grok --project
+statuspan hooks install codex --project
 statuspan hooks install claude --dry-run
 statuspan hooks uninstall claude
 statuspan hooks uninstall grok
+statuspan hooks uninstall codex
 ```
 
-`--project` writes `./.claude/settings.json` or `./.grok/hooks/statuspan.json` (`--dir` chooses the project root). `--settings PATH` chooses a file. `--home PATH` overrides the home directory. `--dry-run` prints the JSON and writes nothing. Secrets in titles and notes are redacted best-effort before the post. Stop runs at the end of every turn, so an idle interactive session shows done until the next prompt. The hooks only post status. They print nothing back into the session and they do not block it. Do not pass `--token` to `hooks install`. Use `--token-file` or `STATUSPAN_TOKEN`.
+`--project` writes `./.claude/settings.json`, `./.grok/hooks/statuspan.json`, or `./.codex/hooks.json` (`--dir` chooses the project root). `--settings PATH` chooses a file. `--home PATH` overrides the home directory. `--dry-run` prints the JSON and writes nothing. Secrets in titles and notes are redacted best-effort before the post. Stop runs at the end of every turn, so an idle interactive session shows done until the next prompt. Claude and Grok print nothing back into the session. Codex prints `{}` on stdout, because plain text would be added as developer context and Stop requires JSON. The hooks do not block the session. Do not pass `--token` to `hooks install`. Use `--token-file` or `STATUSPAN_TOKEN`.
 
-Claude Code merges handlers into the settings file and leaves other hooks in place. SessionStart is synchronous with a 3 second timeout so its post lands before later events. The other Claude hooks are asynchronous. Grok writes one StatusPan-owned file and loads every `hooks/*.json`. `hooks install grok` refuses to overwrite a file that is not already a StatusPan `hook grok` command. `hooks uninstall grok` removes only that file. Grok project hooks need folder trust (`/hooks-trust` or `--trust`) before they run.
+Claude Code merges handlers into the settings file and leaves other hooks in place. SessionStart is synchronous with a 3 second timeout so its post lands before later events. The other Claude hooks are asynchronous. Codex merges the same way into `hooks.json`. Its SessionStart, Stop, Interrupt, and SessionEnd handlers are synchronous. UserPromptSubmit, PreToolUse, and PermissionRequest are asynchronous. `hooks install codex` uses `$CODEX_HOME/hooks.json` when `CODEX_HOME` is set and `--home` is not. After install, open `/hooks` in Codex and trust the StatusPan hooks. Trust is per hook hash, so installing again with different flags needs trusting again. Codex project hooks load only in trusted projects.
+
+Grok writes one StatusPan-owned file and loads every `hooks/*.json`. `hooks install grok` refuses to overwrite a file that is not already a StatusPan `hook grok` command. `hooks uninstall grok` removes only that file. Grok project hooks need folder trust (`/hooks-trust` or `--trust`) before they run.
 
 Grok also runs hooks from `~/.claude/settings.json` and `~/.cursor/hooks.json`. When `GROK_HOOK_EVENT` is set, StatusPan reports the session as Grok, so a machine with both installs posts the same Grok update twice. That second post is harmless.
 

@@ -41,10 +41,26 @@ var claudeFailMarkerDir = filepath.Join(os.TempDir(), "statuspan-claude")
 // grokFailMarkerDir is the same marker for Grok sessions. Tests replace it.
 var grokFailMarkerDir = filepath.Join(os.TempDir(), "statuspan-grok")
 
+// codexFailMarkerDir is the same marker for Codex sessions. Tests replace it.
+// Codex does not emit StopFailure; SessionEnd still honors a marker the way
+// Claude does, and UserPromptSubmit and Stop clear it.
+var codexFailMarkerDir = filepath.Join(os.TempDir(), "statuspan-codex")
+
+const (
+	// Codex Stop and SubagentStop reject plain text on stdout. Other events
+	// would add that text as developer context. One empty JSON object covers
+	// every path, including ignored events and errors.
+	codexHookStdout = "{}\n"
+	// claudeRestartHint is printed whenever Claude settings are written,
+	// including uninstall, so an open session reloads the file.
+	claudeRestartHint = "Restart Claude Code sessions to pick up the hooks."
+	codexTrustHint    = "Open /hooks in Codex and trust the StatusPan hooks. Trust is per hook hash, so re-installing with different flags needs trusting again."
+	codexProjectHint  = "Project hooks load only in trusted projects."
+)
+
 // hookAdapter is one coding tool that can report through `statuspan hook`.
-// Stdout is per tool: Claude and Grok print nothing, because those CLIs feed
-// hook stdout back into the session. A later tool can set stdout to "{}" or
-// `{"continue":true}`.
+// Stdout is per tool. Claude and Grok print nothing, because those CLIs feed
+// hook stdout back into the session. Codex prints codexHookStdout.
 type hookAdapter struct {
 	name               string
 	displayAgent       string
@@ -52,12 +68,21 @@ type hookAdapter struct {
 	markerDir          func() string
 	ignoreShutdownStop bool
 	mapStopCancelled   bool
-	specs              []hookEventSpec
-	stdout             string
-	locate             func(project bool, settings, home, dir string) (string, error)
+	// codex selects Codex event mapping (apply_patch, PermissionRequest,
+	// Interrupt). Claude and Grok leave it false.
+	codex  bool
+	specs  []hookEventSpec
+	stdout string
+	locate func(project bool, settings, home, dir string) (string, error)
 	// file is true when install writes one StatusPan-owned JSON file.
-	// Claude merges handlers into a settings object instead.
+	// Claude and Codex merge handlers into a hooks object instead.
 	file bool
+	// restartHint is printed whenever the settings file is written.
+	restartHint string
+	// installHint is printed only after a successful install.
+	installHint string
+	// projectHint is printed only after a successful install --project.
+	projectHint string
 }
 
 type hookOpts struct {
@@ -67,10 +92,11 @@ type hookOpts struct {
 	markerDir          func() string
 	ignoreShutdownStop bool
 	mapStopCancelled   bool
+	codex              bool
 }
 
 func hookRegistry() []hookAdapter {
-	return []hookAdapter{claudeAdapter(), grokAdapter()}
+	return []hookAdapter{claudeAdapter(), grokAdapter(), codexAdapter()}
 }
 
 func claudeAdapter() hookAdapter {
@@ -81,6 +107,7 @@ func claudeAdapter() hookAdapter {
 		markerDir:    func() string { return claudeFailMarkerDir },
 		specs:        claudeHookSpecs(),
 		locate:       claudeSettingsPath,
+		restartHint:  claudeRestartHint,
 	}
 }
 
@@ -98,6 +125,21 @@ func grokAdapter() hookAdapter {
 	}
 }
 
+func codexAdapter() hookAdapter {
+	return hookAdapter{
+		name:         "codex",
+		displayAgent: "Codex",
+		jobPrefix:    "codex",
+		markerDir:    func() string { return codexFailMarkerDir },
+		codex:        true,
+		specs:        codexHookSpecs(),
+		stdout:       codexHookStdout,
+		locate:       codexHooksPath,
+		installHint:  codexTrustHint,
+		projectHint:  codexProjectHint,
+	}
+}
+
 func (a hookAdapter) hookOpts() hookOpts {
 	return hookOpts{
 		defaultAgent:       a.displayAgent,
@@ -106,6 +148,7 @@ func (a hookAdapter) hookOpts() hookOpts {
 		markerDir:          a.markerDir,
 		ignoreShutdownStop: a.ignoreShutdownStop,
 		mapStopCancelled:   a.mapStopCancelled,
+		codex:              a.codex,
 	}
 }
 
@@ -399,6 +442,11 @@ func grokUpdate(in claudeHookInput, agent string) (store.Update, bool) {
 	return grokAdapter().update(in, agent)
 }
 
+// codexUpdate maps one Codex CLI hook payload.
+func codexUpdate(in claudeHookInput, agent string) (store.Update, bool) {
+	return codexAdapter().update(in, agent)
+}
+
 func (a hookAdapter) update(in claudeHookInput, agent string) (store.Update, bool) {
 	return mapSessionHook(normalizeHookInput(in), agent, a.hookOpts())
 }
@@ -419,7 +467,9 @@ func mapSessionHook(in claudeHookInput, agent string, opts hookOpts) (store.Upda
 	}
 	event := strings.TrimSpace(string(in.HookEventName))
 	subagent := strings.TrimSpace(string(in.AgentID)) != ""
-	if subagent && event != "PreToolUse" {
+	// Codex subagent hooks are their own events and carry the parent session
+	// id. An agent_id on a Codex payload is not a reason to drop the event.
+	if !opts.codex && subagent && event != "PreToolUse" {
 		return store.Update{}, false
 	}
 	markerDir := ""
@@ -458,14 +508,28 @@ func mapSessionHook(in claudeHookInput, agent string, opts hookOpts) (store.Upda
 		}
 	case "PreToolUse":
 		state = "running"
-		note = toolProgress(string(in.Cwd), string(in.ToolName), toolObject(in.ToolInput))
-		if subagent && !strings.HasPrefix(note, "Subagent: ") {
-			note = "Subagent: " + note
-			note = truncateRunes(collapse(note), hookNoteMax, false)
+		input := toolObject(in.ToolInput)
+		if opts.codex {
+			note = codexToolNote(string(in.Cwd), string(in.ToolName), input)
+		} else {
+			note = toolProgress(string(in.Cwd), string(in.ToolName), input)
+			if subagent && !strings.HasPrefix(note, "Subagent: ") {
+				note = "Subagent: " + note
+				note = truncateRunes(collapse(note), hookNoteMax, false)
+			}
 		}
 	case "PostToolUse", "PostToolUseFailure", "PermissionDenied":
 		return store.Update{}, false
+	case "PermissionRequest":
+		if !opts.codex {
+			return store.Update{}, false
+		}
+		state = "blocked"
+		note = approvalNote(codexToolNote(string(in.Cwd), string(in.ToolName), toolObject(in.ToolInput)))
 	case "Notification":
+		if opts.codex {
+			return store.Update{}, false
+		}
 		switch string(in.NotificationType) {
 		case "permission_prompt", "elicitation_dialog", "elicitation_url_dialog":
 			state = "blocked"
@@ -486,7 +550,8 @@ func mapSessionHook(in claudeHookInput, agent string, opts hookOpts) (store.Upda
 		if bool(in.StopHookActive) {
 			return store.Update{}, false
 		}
-		if n := countJSONArray(in.BackgroundTasks); n > 0 {
+		// Codex has no background-task wait. A turn stop is done.
+		if n := countJSONArray(in.BackgroundTasks); n > 0 && !opts.codex {
 			state = "running"
 			note = fmt.Sprintf("Waiting on %d background task(s)", n)
 		} else {
@@ -496,7 +561,16 @@ func mapSessionHook(in claudeHookInput, agent string, opts hookOpts) (store.Upda
 			note = turnFinishedNote(string(in.LastAssistantMessage))
 			removeFailMarker(markerDir, sessionID)
 		}
+	case "Interrupt":
+		if !opts.codex {
+			return store.Update{}, false
+		}
+		state = "done"
+		note = "Turn interrupted"
 	case "StopFailure":
+		if opts.codex {
+			return store.Update{}, false
+		}
 		state = "failed"
 		note = failureNote(string(in.Error), rawJSONText(in.ErrorDetails))
 		writeFailMarker(markerDir, sessionID)
@@ -969,6 +1043,70 @@ func commandNote(prefix, command string) string {
 	return prefix + ": " + cmd
 }
 
+// codexToolNote is the one-line tool text for Codex PreToolUse and
+// PermissionRequest. Bash is "Run:" (Codex is not Claude). apply_patch
+// names the files in the patch instead of printing the patch.
+func codexToolNote(cwd, tool string, input map[string]any) string {
+	switch strings.ToLower(strings.TrimSpace(tool)) {
+	case "apply_patch":
+		return applyPatchNote(cwd, asString(input["command"]))
+	case "bash":
+		return sanitizeText(commandNote("Run", asString(input["command"])), hookNoteMax)
+	default:
+		return toolProgress(cwd, tool, input)
+	}
+}
+
+func approvalNote(toolText string) string {
+	toolText = collapse(toolText)
+	if toolText == "" {
+		return "Needs your approval"
+	}
+	return sanitizeText("Needs your approval: "+toolText, hookNoteMax)
+}
+
+func applyPatchNote(cwd, patch string) string {
+	paths := applyPatchPaths(patch)
+	if len(paths) == 0 {
+		return "Edit files"
+	}
+	note := "Edit " + displayPath(cwd, paths[0])
+	if len(paths) > 1 {
+		note += fmt.Sprintf(" (+%d more)", len(paths)-1)
+	}
+	return sanitizeText(note, hookNoteMax)
+}
+
+func applyPatchPaths(patch string) []string {
+	var paths []string
+	for _, line := range strings.Split(patch, "\n") {
+		line = strings.TrimSpace(strings.TrimRight(line, "\r"))
+		path, ok := applyPatchPath(line)
+		if !ok {
+			continue
+		}
+		path = strings.TrimSpace(path)
+		if path == "" {
+			continue
+		}
+		paths = append(paths, path)
+	}
+	return paths
+}
+
+func applyPatchPath(line string) (string, bool) {
+	for _, prefix := range []string{
+		"*** Add File:",
+		"*** Update File:",
+		"*** Delete File:",
+	} {
+		if strings.HasPrefix(line, prefix) {
+			return line[len(prefix):], true
+		}
+	}
+	return "", false
+}
+
 func inputString(input map[string]any, key string) (string, bool) {
 	v, ok := input[key]
 	if !ok || v == nil {
@@ -1256,7 +1394,7 @@ func hooksAction(action string, args []string) error {
 func claudeHooksAction(action string, adapter hookAdapter, command, bin string, project bool, settings, home, dir string, dry bool) error {
 	if action == "print" {
 		doc := map[string]any{}
-		if err := mergeClaudeHooks(doc, adapter.specs, command, bin, false); err != nil {
+		if err := mergeClaudeHooks(doc, adapter.specs, command, adapter.name, bin, false); err != nil {
 			return err
 		}
 		data, err := marshalSettings(doc)
@@ -1274,7 +1412,7 @@ func claudeHooksAction(action string, adapter hookAdapter, command, bin string, 
 	if err != nil {
 		return err
 	}
-	if err := mergeClaudeHooks(doc, adapter.specs, command, bin, action == "uninstall"); err != nil {
+	if err := mergeClaudeHooks(doc, adapter.specs, command, adapter.name, bin, action == "uninstall"); err != nil {
 		return err
 	}
 	data, err := marshalSettings(doc)
@@ -1289,7 +1427,24 @@ func claudeHooksAction(action string, adapter hookAdapter, command, bin string, 
 		fmt.Fprintf(os.Stderr, "No settings file at %s\n", path)
 		return nil
 	}
-	return writeClaudeSettings(path, data, existed)
+	return writeClaudeSettings(path, data, existed, hookWriteNotes(adapter, action, project))
+}
+
+func hookWriteNotes(adapter hookAdapter, action string, project bool) []string {
+	var notes []string
+	if adapter.restartHint != "" {
+		notes = append(notes, adapter.restartHint)
+	}
+	if action != "install" {
+		return notes
+	}
+	if adapter.installHint != "" {
+		notes = append(notes, adapter.installHint)
+	}
+	if project && adapter.projectHint != "" {
+		notes = append(notes, adapter.projectHint)
+	}
+	return notes
 }
 
 // peelToolArg accepts the tool before flags (`hooks install claude --project`).
@@ -1452,6 +1607,18 @@ func claudeHookSpecs() []hookEventSpec {
 	}
 }
 
+func codexHookSpecs() []hookEventSpec {
+	return []hookEventSpec{
+		{name: "SessionStart", timeout: 3},
+		{name: "UserPromptSubmit", async: true},
+		{name: "PreToolUse", matcher: "*", async: true},
+		{name: "PermissionRequest", matcher: "*", async: true},
+		{name: "Stop", timeout: 5},
+		{name: "Interrupt", timeout: 2},
+		{name: "SessionEnd", timeout: 3},
+	}
+}
+
 func grokHookSpecs() []hookEventSpec {
 	return []hookEventSpec{
 		{name: "SessionStart", timeout: 3},
@@ -1489,6 +1656,38 @@ func grokHooksPath(project bool, settings, home, dir string) (string, error) {
 		}
 	}
 	return filepath.Join(h, ".grok", "hooks", "statuspan.json"), nil
+}
+
+// codexHooksPath is the Codex hooks file. --settings wins. --project writes
+// <dir>/.codex/hooks.json. --home writes <home>/.codex/hooks.json and ignores
+// CODEX_HOME. Otherwise $CODEX_HOME/hooks.json is used when CODEX_HOME is
+// set, and ~/.codex/hooks.json when it is not.
+func codexHooksPath(project bool, settings, home, dir string) (string, error) {
+	if strings.TrimSpace(settings) != "" {
+		return settings, nil
+	}
+	if project {
+		base := strings.TrimSpace(dir)
+		if base == "" {
+			var err error
+			base, err = os.Getwd()
+			if err != nil {
+				return "", err
+			}
+		}
+		return filepath.Join(base, ".codex", "hooks.json"), nil
+	}
+	if h := strings.TrimSpace(home); h != "" {
+		return filepath.Join(h, ".codex", "hooks.json"), nil
+	}
+	if codexHome := strings.TrimSpace(os.Getenv("CODEX_HOME")); codexHome != "" {
+		return filepath.Join(codexHome, "hooks.json"), nil
+	}
+	h, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("home directory: %w", err)
+	}
+	return filepath.Join(h, ".codex", "hooks.json"), nil
 }
 
 func grokHooksAction(action string, specs []hookEventSpec, command, bin string, project bool, settings, home, dir string, dry bool) error {
@@ -1608,12 +1807,12 @@ func walkStatuspanHook(v any, tool, bin string) bool {
 	return false
 }
 
-func mergeClaudeHooks(doc map[string]any, specs []hookEventSpec, command, bin string, removeOnly bool) error {
+func mergeClaudeHooks(doc map[string]any, specs []hookEventSpec, command, tool, bin string, removeOnly bool) error {
 	hooks, err := hooksObject(doc)
 	if err != nil {
 		return err
 	}
-	if err := stripStatuspanHooks(hooks, bin); err != nil {
+	if err := stripStatuspanHooks(hooks, tool, bin); err != nil {
 		return err
 	}
 	if !removeOnly {
@@ -1643,7 +1842,7 @@ func hooksObject(doc map[string]any) (map[string]any, error) {
 	return hooks, nil
 }
 
-func stripStatuspanHooks(hooks map[string]any, bin string) error {
+func stripStatuspanHooks(hooks map[string]any, tool, bin string) error {
 	for event, raw := range hooks {
 		groups, err := asArray(raw)
 		if err != nil {
@@ -1673,7 +1872,7 @@ func stripStatuspanHooks(hooks map[string]any, bin string) error {
 					continue
 				}
 				cmd, _ := hm["command"].(string)
-				if isStatuspanClaudeHook(cmd, bin) {
+				if isStatuspanHook(cmd, tool, bin) {
 					continue
 				}
 				hkept = append(hkept, hm)
@@ -1811,7 +2010,7 @@ func marshalSettings(doc map[string]any) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-func writeClaudeSettings(path string, data, existed []byte) error {
+func writeClaudeSettings(path string, data, existed []byte, notes []string) error {
 	var backup string
 	if existed != nil {
 		var err error
@@ -1827,7 +2026,12 @@ func writeClaudeSettings(path string, data, existed []byte) error {
 	if backup != "" {
 		fmt.Fprintf(os.Stderr, "Backup %s\n", backup)
 	}
-	fmt.Fprintln(os.Stderr, "Restart Claude Code sessions to pick up the hooks.")
+	for _, note := range notes {
+		if note == "" {
+			continue
+		}
+		fmt.Fprintln(os.Stderr, note)
+	}
 	return nil
 }
 
