@@ -4,6 +4,7 @@
 package store
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -38,6 +39,9 @@ type ValidationError struct {
 func (e *ValidationError) Error() string { return e.Msg }
 
 func invalid(msg string) error { return &ValidationError{Msg: msg} }
+
+// ErrNotFound is a missing job. The title overlay returns it. Delete does not.
+var ErrNotFound = errors.New("not found")
 
 // Update is one ingested job report. Nil pointers mean the field was omitted
 // and must not overwrite the stored value.
@@ -80,9 +84,12 @@ type Event struct {
 
 // JobView is the current job plus computed fields for the board and API.
 type JobView struct {
-	Agent          string     `json:"agent"`
-	JobID          string     `json:"job_id"`
-	Title          string     `json:"title"`
+	Agent string `json:"agent"`
+	JobID string `json:"job_id"`
+	Title string `json:"title"`
+	// RawTitle is the last agent-posted title when Title is a local overlay.
+	// Omitted when the board is showing the agent title itself.
+	RawTitle       string     `json:"raw_title,omitempty"`
 	State          string     `json:"state"`
 	Progress       int        `json:"progress"`
 	Link           string     `json:"link,omitempty"`
@@ -139,24 +146,26 @@ type abandonPolicy struct {
 }
 
 type jobState struct {
-	agent      string
-	jobID      string
-	title      string
-	state      string
-	progress   int
-	link       string
-	note       string
-	ttl        int
-	seq        int64
-	hasSeq     bool
-	startedAt  time.Time
-	updatedAt  time.Time
-	finishedAt *time.Time
-	via        string
-	ip         string
-	country    string
-	receivedAt string
-	history    []Event
+	agent        string
+	jobID        string
+	title        string
+	titleOverlay string // local display title; not written to the log
+	overlayFor   string // raw title the overlay was computed from
+	state        string
+	progress     int
+	link         string
+	note         string
+	ttl          int
+	seq          int64
+	hasSeq       bool
+	startedAt    time.Time
+	updatedAt    time.Time
+	finishedAt   *time.Time
+	via          string
+	ip           string
+	country      string
+	receivedAt   string
+	history      []Event
 }
 
 // Store is safe for concurrent use.
@@ -440,7 +449,14 @@ func (s *Store) absorb(u Update, ts time.Time, n int64) bool {
 
 func (j *jobState) merge(u Update, ts time.Time) {
 	if u.Title != nil {
-		j.title = *u.Title
+		next := *u.Title
+		// Same raw title keeps a local overlay. A different title drops it
+		// so the board can summarize the new text once.
+		if j.titleOverlay != "" && next != j.overlayFor {
+			j.titleOverlay = ""
+			j.overlayFor = ""
+		}
+		j.title = next
 	}
 	if u.Link != nil {
 		j.link = *u.Link
@@ -605,6 +621,37 @@ func (s *Store) List() (time.Time, []JobView) {
 	return now, s.listLocked(now)
 }
 
+// SetTitleOverlay shows title in place of the job's current raw title.
+// It does not append a log line, so seq, updated_at, and history stay put.
+// A missing job is ErrNotFound. A blank title is a validation error.
+// The overlay is memory-only and is gone after the next Open.
+func (s *Store) SetTitleOverlay(agent, jobID, title string) (JobView, error) {
+	if err := validateID(agent, "agent"); err != nil {
+		return JobView{}, err
+	}
+	if err := validateID(jobID, "job_id"); err != nil {
+		return JobView{}, err
+	}
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return JobView{}, invalid("title is required")
+	}
+	if len([]rune(title)) > 200 {
+		return JobView{}, invalid("title is too long")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	job, ok := s.jobs[jobKey(agent, jobID)]
+	if !ok {
+		return JobView{}, ErrNotFound
+	}
+	job.titleOverlay = title
+	job.overlayFor = job.title
+	v := job.view(s.now(), s.policy())
+	s.broadcast(v)
+	return v, nil
+}
+
 // Get returns one job.
 func (s *Store) Get(agent, jobID string) (JobView, bool) {
 	s.mu.Lock()
@@ -752,10 +799,14 @@ func (j *jobState) view(now time.Time, pol abandonPolicy) JobView {
 	hist := make([]Event, len(j.history))
 	copy(hist, j.history)
 	abandoned, abandonedAt := j.abandoned(now, pol)
+	title := j.title
+	if j.titleOverlay != "" {
+		title = j.titleOverlay
+	}
 	v := JobView{
 		Agent:          j.agent,
 		JobID:          j.jobID,
-		Title:          j.title,
+		Title:          title,
 		State:          j.state,
 		Progress:       j.progress,
 		Link:           j.link,
@@ -775,6 +826,9 @@ func (j *jobState) view(now time.Time, pol abandonPolicy) JobView {
 	if abandoned {
 		t := abandonedAt
 		v.AbandonedAt = &t
+	}
+	if j.titleOverlay != "" {
+		v.RawTitle = j.title
 	}
 	if j.hasSeq {
 		seq := j.seq
